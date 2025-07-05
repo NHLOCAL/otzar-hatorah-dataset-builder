@@ -5,56 +5,61 @@ import logging
 import subprocess
 import tempfile
 from tqdm import tqdm
-from markitdown import MarkItDown
 from datasets import load_dataset
+import multiprocessing
 
-# --- NEW DEPENDENCIES ---
-# Make sure to install the required libraries for metadata extraction:
-# pip install python-docx PyPDF2
+# --- תלות חדשה ---
 try:
     import docx
-    from PyPDF2 import PdfReader
+    from pypdf import PdfReader
 except ImportError:
-    print("Error: Missing required libraries. Please run: pip install python-docx PyPDF2")
+    print("Error: Missing required libraries. Please run: pip install python-docx pypdf")
     exit()
 
-# Configure basic logging to suppress excessive output
+# הגדרת לוגינג בסיסי להסתרת פלט עודף
 logging.basicConfig(level=logging.ERROR)
 
-# --- Constants: update these paths for your environment ---
-ROOT_DIRECTORY = r"C:\Users\me\Documents\אוצר התורה\גמח אוצר התורה החדש טבת תשפה"
-SOFFICE_PATH = r"C:\Program Files\LibreOffice\program\soffice"
+# --- קבועים: יש לעדכן את הנתיבים לסביבה שלך ---
+SCRIPT_DIR = pathlib.Path(__file__).parent
+ROOT_DIRECTORY = SCRIPT_DIR / "Otzar_Hatorah_Books"  # דוגמה לנתיב יחסי
+SOFFICE_PATH = r"C:\Program Files\LibreOffice\program\soffice" # יש לוודא שנתיב זה נכון
 
 OUTPUT_FILE = "otzar_hatorah_dataset.jsonl"
 PATTERNS_TO_DELETE = ["~$", "desktop.ini"]
 IGNORED_EXTENSIONS = [".rar", ".zip", ".xps", ".ini", ""]
 
-# Initialize MarkItDown converter. Plugins are still enabled for fallback.
-md_converter = MarkItDown(enable_plugins=True)
+
+def get_processed_files(output_path: str) -> set:
+    """קוראת את קובץ הפלט ויוצרת סט של קבצים שכבר עובדו."""
+    processed = set()
+    if not os.path.exists(output_path):
+        return processed
+    with open(output_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            try:
+                record = json.loads(line)
+                if 'source' in record:
+                    processed.add(record['source'])
+            except json.JSONDecodeError:
+                continue
+    return processed
 
 
 def extract_file_metadata(file_path: pathlib.Path) -> dict:
-    """
-    Extracts metadata from supported file types (.docx, .pdf).
-    Args:
-        file_path: The path to the file (as a pathlib.Path object).
-    Returns:
-        A dictionary containing the extracted metadata.
-    """
+    """מחלצת מטא-דאטה מקבצים נתמכים (docx, pdf)."""
     metadata = {}
     ext = file_path.suffix.lower()
     try:
         if ext == '.docx':
             doc = docx.Document(file_path)
             props = doc.core_properties
-            # Extract all available core properties
             metadata = {
                 'author': props.author,
                 'created': props.created.isoformat() if props.created else None,
                 'modified': props.modified.isoformat() if props.modified else None,
                 'last_modified_by': props.last_modified_by,
                 'subject': props.subject,
-                'title_meta': props.title,  # Use a different key to avoid conflict
+                'title_meta': props.title,
                 'version': props.version
             }
         elif ext == '.pdf':
@@ -62,7 +67,6 @@ def extract_file_metadata(file_path: pathlib.Path) -> dict:
                 reader = PdfReader(f)
                 info = reader.metadata
                 if info:
-                    # Extract common PDF metadata fields
                     metadata = {
                         'author': info.author,
                         'creator': info.creator,
@@ -70,138 +74,154 @@ def extract_file_metadata(file_path: pathlib.Path) -> dict:
                         'subject': info.subject,
                         'title_meta': info.title
                     }
-    except Exception as e:
-        # Silently fail if metadata extraction doesn't work for a file
-        tqdm.write(f"Could not extract metadata from {file_path.name}: {e}")
+    except Exception:
+        # שגיאות כאן אינן קריטיות, נתעלם בשקט
         pass
-    # Filter out any keys that have None or empty string values
     return {k: v for k, v in metadata.items() if v}
 
 
-def clean_target_directory(root_dir: str):
+def process_single_file(file_path_str: str) -> dict or None:
     """
-    (Optional) Remove junk files before processing.
+    *** פונקציית העובד המרכזית ***
+    מקבלת נתיב לקובץ, מעבדת אותו ומחזירה רשומת JSON או None במקרה של כשל.
     """
-    print("\n--- Starting Pre-cleanup Phase ---")
-    deleted_count = 0
+    # אתחול הממיר בתוך התהליך כדי למנוע בעיות של שיתוף אובייקטים
+    md_converter = MarkItDown(enable_plugins=True)
+    root_path = ROOT_DIRECTORY # משתמשים בקבוע הגלובלי
+
+    file_obj = pathlib.Path(file_path_str)
+    temp_dir_mgr = None
     try:
-        root_path = pathlib.Path(root_dir)
-        if not root_path.exists():
-            print(f"Warning: Directory not found: {root_dir}")
-            return
-        for file_path in tqdm(root_path.rglob('*.*'), desc="Scanning for junk files"):
-            name = file_path.name
-            if any(name.startswith(p) for p in PATTERNS_TO_DELETE):
-                try:
-                    os.remove(file_path)
-                    tqdm.write(f"Deleted: {file_path}")
-                    deleted_count += 1
-                except OSError as e:
-                    tqdm.write(f"Error deleting {file_path}: {e}")
+        # סינון בסיסי
+        name = file_obj.name
+        ext = file_obj.suffix.lower()
+        if not file_obj.is_file() or any(name.startswith(p) for p in PATTERNS_TO_DELETE) or ext in IGNORED_EXTENSIONS:
+            return None
+
+        path_to_process = file_obj
+        if ext == '.doc':
+            # כל תהליך מקבל ספרייה זמנית משלו
+            temp_dir_mgr = tempfile.TemporaryDirectory()
+            temp_dir_path = pathlib.Path(temp_dir_mgr.name)
+
+            # יצירת נתיב פרופיל ייחודי ל-LibreOffice כדי למנוע התנגשויות
+            user_profile_path_uri = (temp_dir_path / "profile").as_uri()
+            cmd = [
+                SOFFICE_PATH,
+                f"-env:UserInstallation={user_profile_path_uri}", # <-- הפתרון לבעיית המקביליות
+                '--headless',
+                '--convert-to', 'docx',
+                '--outdir', str(temp_dir_path),
+                str(file_obj)
+            ]
+            
+            # הגדלת timeout והרצת הפקודה
+            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=120)
+            
+            converted_path = temp_dir_path / (file_obj.stem + '.docx')
+            if not converted_path.exists():
+                raise FileNotFoundError(f"LibreOffice conversion failed for {file_obj.name}")
+            path_to_process = converted_path
+
+        result = md_converter.convert(str(path_to_process))
+        text = result.text_content or ''
+        if not text.strip():
+            return None # קובץ ריק
+
+        rel_path_posix = file_obj.relative_to(root_path).as_posix()
+        final_metadata = {
+            "title": file_obj.stem,
+            "categories": list(file_obj.relative_to(root_path).parts[:-1])
+        }
+
+        explicit_meta = extract_file_metadata(path_to_process)
+        if explicit_meta:
+            final_metadata.update(explicit_meta)
+
+        return {
+            "text": text.strip(),
+            "source": rel_path_posix,
+            "metadata": final_metadata
+        }
+    
+    except subprocess.CalledProcessError as e:
+        # טיפול שגיאות מפורט: מדפיס את הפלט המדויק מ-LibreOffice
+        tqdm.write(f"LibreOffice conversion error for '{file_obj.name}':\n"
+                   f"STDOUT: {e.stdout.strip()}\n"
+                   f"STDERR: {e.stderr.strip()}")
+        return None
     except Exception as e:
-        print(f"Cleanup error: {e}")
-    print(f"Cleanup finished. Deleted {deleted_count} junk files.")
+        # טיפול בשגיאות אחרות
+        tqdm.write(f"Error processing '{file_obj.name}': {e}")
+        return None
+    finally:
+        # ניקוי הספרייה הזמנית
+        if temp_dir_mgr:
+            temp_dir_mgr.cleanup()
 
 
-def process_and_stream_to_jsonl(root_dir: str, output_path: str):
-    """
-    Walk through files, convert to Markdown, extract metadata, and stream to JSONL.
-    """
-    processed, errors = 0, 0
-    root_path = pathlib.Path(root_dir)
+def main():
+    """הפונקציה הראשית שמנהלת את תהליך העיבוד המקבילי"""
+    
+    root_path = pathlib.Path(ROOT_DIRECTORY)
     if not root_path.exists():
-        print(f"Fatal: Root directory does not exist: {root_dir}")
-        return processed, errors
+        print(f"Fatal: Root directory does not exist: {ROOT_DIRECTORY}")
+        return
 
-    all_files = list(root_path.rglob('*'))
-    print(f"\n--- Processing {len(all_files)} files ---")
+    # 1. הכנת רשימת העבודה
+    print("Scanning for files to process...")
+    already_processed = get_processed_files(OUTPUT_FILE)
+    
+    # יצירת רשימת הקבצים שיש לעבד
+    all_files_paths = [f for f in root_path.rglob('*') if f.is_file()]
+    files_to_process = [
+        str(f) for f in all_files_paths
+        if f.relative_to(root_path).as_posix() not in already_processed
+    ]
 
-    with open(output_path, 'w', encoding='utf-8') as out_f:
-        for file_obj in tqdm(all_files, desc="Processing files"):
-            temp_dir_mgr = None
-            try:
-                name = file_obj.name
-                ext = file_obj.suffix.lower()
-                if any(name.startswith(p) for p in PATTERNS_TO_DELETE) or ext in IGNORED_EXTENSIONS:
-                    continue
+    if not files_to_process:
+        print("No new files to process. All up to date.")
+    else:
+        print(f"Found {len(already_processed)} processed files. Resuming with {len(files_to_process)} new files.")
 
-                path_to_process = file_obj
-                if ext == '.doc':
-                    temp_dir_mgr = tempfile.TemporaryDirectory()
-                    cmd = [SOFFICE_PATH, '--headless', '--convert-to', 'docx', '--outdir', temp_dir_mgr.name, str(file_obj)]
-                    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60)
-                    converted_path = pathlib.Path(temp_dir_mgr.name) / (file_obj.stem + '.docx')
-                    if not converted_path.exists():
-                        raise FileNotFoundError(f"Conversion failed for {file_obj.name}")
-                    path_to_process = converted_path
+        # 2. עיבוד מקבילי
+        processed_count, error_count = 0, 0
+        # השתמש ברוב הליבות, אך השאר אחת פנויה למערכת ההפעלה
+        num_workers = max(1, multiprocessing.cpu_count() - 1)
+        print(f"\n--- Starting parallel processing with {num_workers} workers ---")
 
-                # Convert main content to Markdown text
-                result = md_converter.convert(str(path_to_process))
-                text = result.text_content or ''
-                if not text.strip():
-                    continue
+        with open(OUTPUT_FILE, 'a', encoding='utf-8') as out_f:
+            with multiprocessing.Pool(processes=num_workers) as pool:
+                # שימוש ב-imap_unordered לקבלת תוצאות ברגע שהן מוכנות
+                with tqdm(total=len(files_to_process), desc="Processing files") as progress_bar:
+                    for result in pool.imap_unordered(process_single_file, files_to_process):
+                        if result:
+                            out_f.write(json.dumps(result, ensure_ascii=False) + '\n')
+                            processed_count += 1
+                        else:
+                            error_count += 1
+                        progress_bar.update(1)
 
-                # --- METADATA GATHERING ---
-                # 1. Start with metadata from file path (title from filename, categories from folders)
-                rel_path = file_obj.relative_to(root_path)
-                final_metadata = {
-                    "title": file_obj.stem,
-                    "categories": list(rel_path.parts[:-1])
-                }
-
-                # 2. Add metadata extracted directly from the file content (docx, pdf, etc.)
-                # This is now the primary source for internal metadata.
-                explicit_meta = extract_file_metadata(path_to_process)
-                if explicit_meta:
-                    final_metadata.update(explicit_meta)
-                
-                # --- RECORD ASSEMBLY ---
-                record = {
-                    "text": text.strip(),
-                    "source": str(rel_path.as_posix()),  # Use POSIX path for consistency
-                    "metadata": final_metadata
-                }
-
-                out_f.write(json.dumps(record, ensure_ascii=False) + '\n')
-                processed += 1
-
-            except subprocess.CalledProcessError as e:
-                errors += 1
-                tqdm.write(f"LibreOffice conversion error for {file_obj.name}: {e.stderr}")
-            except subprocess.TimeoutExpired:
-                errors += 1
-                tqdm.write(f"Timeout converting {file_obj.name}")
-            except Exception as e:
-                errors += 1
-                tqdm.write(f"Error processing {file_obj.name}: {e}")
-            finally:
-                if temp_dir_mgr:
-                    temp_dir_mgr.cleanup()
-
-    print(f"\n--- Summary: {processed} processed, {errors} errors ---")
-    return processed, errors
-
-
-if __name__ == '__main__':
-    # 1) Pre-cleanup
-    # clean_target_directory(ROOT_DIRECTORY)
-    # 2) Conversion & streaming
-    processed_count, error_count = process_and_stream_to_jsonl(ROOT_DIRECTORY, OUTPUT_FILE)
-    # 3) Verify dataset
+        print(f"\n--- Summary: {processed_count} new files processed, {error_count} errors ---")
+    
+    # 3. אימות הדאטהסט
     print(f"\n--- Verifying: {OUTPUT_FILE} ---")
     try:
         if os.path.exists(OUTPUT_FILE) and os.path.getsize(OUTPUT_FILE) > 0:
             ds = load_dataset('json', data_files=OUTPUT_FILE)
             print("Verification successful. Dataset info:")
             print(ds)
-            # Print the first record to show an example with metadata
             if len(ds['train']) > 0:
-                print("\nExample of first record:")
-                print(ds['train'][0])
+                print("\nExample of last processed record:")
+                print(ds['train'][-1])
         else:
             print("No output generated or file is empty.")
     except Exception as e:
         print(f"Dataset load failed: {e}")
 
-    print("--- Done ---")
+    print("\n--- Done ---")
 
+
+if __name__ == '__main__':
+    # הכרחי להריץ את הקוד הראשי בתוך בלוק זה כשמשתמשים ב-multiprocessing
+    main()
