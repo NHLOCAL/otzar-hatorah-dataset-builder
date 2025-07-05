@@ -1,0 +1,11 @@
+# requirements.txt
+
+# For dataset creation (create_dataset_markdown.py)
+datasets
+tqdm
+markitdown[all]
+python-docx
+pypdf
+
+# For uploading (upload_to_hf.py)
+huggingface_hub

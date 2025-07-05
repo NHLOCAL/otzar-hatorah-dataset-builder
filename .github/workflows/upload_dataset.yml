@@ -1,0 +1,52 @@
+# .github/workflows/upload_dataset.yml
+
+name: Upload Dataset to Hugging Face
+
+on:
+  # הפעלה אוטומטית כאשר יש push לענף הראשי שמשנה את קובץ הדאטהסט
+  push:
+    branches:
+      - main
+    paths:
+      - 'otzar_hatorah_dataset.jsonl'
+  
+  # הפעלה ידנית דרך ממשק ה-Actions ב-GitHub
+  workflow_dispatch:
+
+env:
+  # הגדר כאן את שם ריפו הדאטהסט שלך ב-Hugging Face
+  HF_DATASET_REPO_ID: "nhlocal/otzar-hatorah"
+
+jobs:
+  upload-dataset:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # שלב 1: שכפול הריפו עם תמיכה מלאה ב-Git LFS
+      # lfs: true חיוני כדי להוריד את הקובץ המלא ולא רק את המצביע
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      # שלב 2: הגדרת סביבת פייתון
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # שלב 3: התקנת הספריות הנדרשות להעלאה
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install huggingface_hub
+
+      # שלב 4: הרצת סקריפט ההעלאה
+      # הסקריפט משתמש ב-HF_TOKEN שהוגדר כ-Secret בריפו
+      - name: Run upload script
+        env:
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+        run: |
+          python upload_to_hf.py \
+            --repo-id ${{ env.HF_DATASET_REPO_ID }} \
+            --local-path otzar_hatorah_dataset.jsonl
