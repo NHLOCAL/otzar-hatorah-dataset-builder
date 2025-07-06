@@ -33,7 +33,7 @@ SOFFICE_PATH = r"C:\Program Files\LibreOffice\program\soffice"  # יש לווד�
 # --- שינוי: הגדרות פלט חדשות לפיצול קבצים ---
 OUTPUT_DIR = SCRIPT_DIR / "output_dataset"
 OUTPUT_BASENAME = "otzar_hatorah_dataset"
-CHUNK_SIZE = 500  # מספר הרשומות בכל קובץ פלט
+CHUNK_SIZE = 250  # מספר הרשומות בכל קובץ פלט
 
 # --- עדכון: נוספו תבניות להתעלמות ---
 PATTERNS_TO_DELETE = ["~$", "desktop.ini", "~"] # מתעלם מקבצי וורד זמניים וקבצים שמתחילים בטילדה

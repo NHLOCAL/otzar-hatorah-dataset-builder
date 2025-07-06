@@ -1,4 +1,4 @@
-name: Upload Dataset to Hugging Face
+name: Convert and Upload Dataset to Hugging Face
 
 on:
   # הפעלה אוטומטית כאשר יש push לענף הראשי שמשנה קבצים בתיקיית הפלט
@@ -8,6 +8,7 @@ on:
     paths:
       - 'output_dataset/**'
       - 'upload_directory_to_hf.py'
+      - 'jsonl_to_parquet.py'
   
   # הפעלה ידנית דרך ממשק ה-Actions ב-GitHub
   workflow_dispatch:
@@ -15,11 +16,13 @@ on:
 env:
   # הגדר כאן את שם ריפו הדאטהסט שלך ב-Hugging Face
   HF_DATASET_REPO_ID: "nhlocal/otzar-hatorah"
-  # שם התיקייה המקומית שמכילה את קבצי הדאטהסט
-  LOCAL_DATASET_DIR: "output_dataset"
+  # שם התיקייה המקומית שמכילה את קבצי ה-JSONL
+  JSONL_SOURCE_DIR: "output_dataset"
+  # שם התיקייה אליה יכתבו קבצי ה-Parquet
+  PARQUET_OUTPUT_DIR: "converted_parquet"
 
 jobs:
-  upload-dataset:
+  build-and-upload:
     runs-on: ubuntu-latest
     steps:
       # שלב 1: שכפול הריפו עם תמיכה מלאה ב-Git LFS
@@ -34,17 +37,26 @@ jobs:
         with:
           python-version: '3.11'
 
-      # שלב 3: התקנת הספריות הנדרשות להעלאה ועיבוד מטא-דאטה
+      # שלב 3: התקנת הספריות הנדרשות (כולל תלויות להמרה)
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install huggingface_hub
+          pip install -r requirements.txt
 
-      # שלב 4: הרצת סקריפט ההעלאה
+      # שלב 4: המרת קבצי JSONL לפורמט Parquet
+      - name: Convert JSONL to Parquet
+        run: |
+          echo "Starting conversion from '${{ env.JSONL_SOURCE_DIR }}' to '${{ env.PARQUET_OUTPUT_DIR }}'..."
+          python jsonl_to_parquet.py
+          echo "Conversion complete."
+
+      # שלב 5: הרצת סקריפט ההעלאה עם תיקיית ה-Parquet
       - name: Run upload script
         env:
+          # העברת הטוקן הסודי של Hugging Face
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
+          echo "Uploading directory '${{ env.PARQUET_OUTPUT_DIR }}' to Hugging Face..."
           python upload_directory_to_hf.py \
             --repo-id ${{ env.HF_DATASET_REPO_ID }} \
-            --local-dir ${{ env.LOCAL_DATASET_DIR }}
+            --local-dir ${{ env.PARQUET_OUTPUT_DIR }}

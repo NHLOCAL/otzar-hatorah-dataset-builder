@@ -7,5 +7,9 @@ markitdown[all]
 python-docx
 pypdf
 
-# For uploading (upload_to_hf.py)
+# For uploading (upload_directory_to_hf.py)
 huggingface_hub
+
+# For Parquet conversion (jsonl_to_parquet.py)
+pandas
+pyarrow
