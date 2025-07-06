@@ -149,13 +149,22 @@ def process_single_file(file_path_str: str) -> dict or None:
                 '--outdir', str(temp_dir_path),
                 str(file_obj)
             ]
-            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=120)
+            # --- עדכון: הגדלת הזמן הקצוב להמרה ---
+            # הזמן הוגדל ל-480 שניות (8 דקות) כדי לתת ל-LibreOffice מספיק זמן
+            # להמיר קבצים גדולים או מורכבים במיוחד ולמנוע כישלונות מיותרים.
+            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=480)
             converted_path = temp_dir_path / (file_obj.stem + '.docx')
             if not converted_path.exists():
                 raise FileNotFoundError(f"LibreOffice conversion failed for {file_obj.name}")
             path_to_process = converted_path
 
-        result = md_converter.convert(str(path_to_process))
+        # --- עדכון: טיפול בשגיאת רקורסיה בקבצי PDF ---
+        try:
+            result = md_converter.convert(str(path_to_process))
+        except RecursionError:
+            tqdm.write(f"Skipping '{file_obj.name}' due to a RecursionError during PDF processing. The file structure may be too complex.")
+            return None
+            
         text = result.text_content or ''
         if not text.strip():
             return None
@@ -219,7 +228,12 @@ def main():
         print(f"Found {len(files_to_process)} new files to process.")
 
         processed_count, error_count = 0, 0
-        num_workers = max(1, multiprocessing.cpu_count() - 1)
+        
+        # --- עדכון: התאמת מספר התהליכים למפרט המחשב ---
+        # למחשב עם 4 ליבות, שימוש ב-2 תהליכים במקביל הוא איזון טוב
+        # שמונע עומס יתר על הדיסק הקשיח ומשאיר משאבים למערכת ההפעלה.
+        num_workers = 2
+        
         print(f"\n--- Starting parallel processing with {num_workers} workers ---")
 
         current_part_num = last_part
