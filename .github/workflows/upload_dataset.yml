@@ -38,7 +38,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install huggingface_hub datasets python-docx PyPDF2
+          pip install huggingface_hub
 
       # שלב 4: הרצת סקריפט ההעלאה
       - name: Run upload script
@@ -48,3 +48,8 @@ jobs:
           python upload_directory_to_hf.py \
             --repo-id ${{ env.HF_DATASET_REPO_ID }} \
             --local-dir ${{ env.LOCAL_DATASET_DIR }}
+
+
+
+2/2
+
