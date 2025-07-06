@@ -37,7 +37,7 @@ CHUNK_SIZE = 500  # מספר הרשומות בכל קובץ פלט
 
 # --- עדכון: נוספו תבניות להתעלמות ---
 PATTERNS_TO_DELETE = ["~$", "desktop.ini", "~"] # מתעלם מקבצי וורד זמניים וקבצים שמתחילים בטילדה
-IGNORED_EXTENSIONS = [".rar", ".zip", ".xps", ".ini", "", ".tmp"]
+IGNORED_EXTENSIONS = [".rar", ".zip", ".xps", ".ini", "", ".tmp", ".db"]
 
 
 def find_last_part_and_processed_files(output_dir: pathlib.Path, basename: str) -> (int, set):
