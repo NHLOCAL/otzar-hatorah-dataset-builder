@@ -181,3 +181,4 @@ cython_debug/
 .cursorindexingignore
 /גמח אוצר התורה החדש טבת תשפה
 /Otzar_Hatorah_Books
+/converted_parquet
