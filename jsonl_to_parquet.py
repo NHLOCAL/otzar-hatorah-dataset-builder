@@ -2,10 +2,48 @@ import os
 import json
 import pandas as pd
 import pyarrow # נדרש ע"י pandas לכתיבה וקריאה של Parquet
+import re # נוסף עבור זיהוי תבניות (אימייל, טלפון)
+
+def anonymize_record(record):
+    """
+    מבצעת אנונימיזציה לרשומה בודדת ע"י הסרת אימיילים ומספרי טלפון.
+    הפונקציה עוברת על כל הערכים במילון, ואם ערך הוא מחרוזת, היא מחפשת בו
+    תבניות של אימייל וטלפון ישראלי ומחליפה אותן.
+
+    Args:
+        record (dict): רשומת הנתונים כמילון.
+
+    Returns:
+        dict: הרשומה לאחר אנונימיזציה.
+    """
+    # הגדרת ביטויים רגולריים (Regex) לזיהוי מידע רגיש
+    # Regex לזיהוי אימייל
+    EMAIL_REGEX = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    # Regex לזיהוי מספרי טלפון ישראליים (סלולרי וקווי, עם/בלי מקף, עם/בלי קידומת +972)
+    PHONE_REGEX = r'\b(?:(?:\+972-?)|0)(?:[23489]|5[0-9]|7[0-9])-?\d{7}\b'
+
+    # הגדרת מצייני המיקום
+    EMAIL_PLACEHOLDER = "[EMAIL_REMOVED]"
+    PHONE_PLACEHOLDER = "[PHONE_REMOVED]"
+
+    anonymized_record = {}
+    for key, value in record.items():
+        if isinstance(value, str):
+            # החלפת כתובות אימייל
+            sanitized_value = re.sub(EMAIL_REGEX, EMAIL_PLACEHOLDER, value)
+            # החלפת מספרי טלפון (על הערך שכבר עבר ניקוי אימיילים)
+            sanitized_value = re.sub(PHONE_REGEX, PHONE_PLACEHOLDER, sanitized_value)
+            anonymized_record[key] = sanitized_value
+        else:
+            # אם הערך אינו מחרוזת, השאר אותו כפי שהוא
+            anonymized_record[key] = value
+
+    return anonymized_record
 
 def convert_jsonl_to_parquet(input_dir, output_dir, output_filename="combined_dataset.parquet"):
     """
-    ממיר מספר קבצי JSONL מתיקיית קלט לקובץ Parquet יחיד בתיקיית פלט.
+    ממיר מספר קבצי JSONL מתיקיית קלט לקובץ Parquet יחיד בתיקיית פלט,
+    תוך כדי ביצוע אנונימיזציה לנתונים (הסרת אימיילים וטלפונים).
 
     Args:
         input_dir (str): הנתיב לתיקיית הקלט המכילה את קבצי ה-JSONL.
@@ -25,13 +63,15 @@ def convert_jsonl_to_parquet(input_dir, output_dir, output_filename="combined_da
         if filename.endswith(".jsonl"):
             filepath = os.path.join(input_dir, filename)
             jsonl_files_found += 1
-            print(f"מעבד קובץ: {filepath}")
+            print(f"מעבד ומבצע אנונימיזציה לקובץ: {filepath}") # עודכן טקסט
 
             with open(filepath, 'r', encoding='utf-8') as f:
                 for line_num, line in enumerate(f):
                     try:
                         record = json.loads(line)
-                        all_records.append(record)
+                        # --- שלב האנונימיזציה ---
+                        anonymized_record = anonymize_record(record)
+                        all_records.append(anonymized_record)
                     except json.JSONDecodeError as e:
                         print(f"אזהרה: שגיאת פענוח JSON בשורה {line_num+1} בקובץ {filename}: {e}")
                         print(f"   השורה הבעייתית: {line.strip()}")
@@ -49,7 +89,7 @@ def convert_jsonl_to_parquet(input_dir, output_dir, output_filename="combined_da
 
     # יצירת DataFrame מכל הרשומות שנאספו
     df = pd.DataFrame(all_records)
-    print(f"נאספו {len(all_records)} רשומות מ-{jsonl_files_found} קבצי JSONL.")
+    print(f"נאספו ועברו אנונימיזציה {len(all_records)} רשומות מ-{jsonl_files_found} קבצי JSONL.")
 
     # בניית נתיב קובץ הפלט
     output_parquet_path = os.path.join(output_dir, output_filename)
@@ -57,7 +97,7 @@ def convert_jsonl_to_parquet(input_dir, output_dir, output_filename="combined_da
     # שמירת ה-DataFrame לפורמט Parquet
     # index=False מונע שמירת האינדקס של pandas כעמודה בקובץ Parquet.
     df.to_parquet(output_parquet_path, index=False)
-    print(f"\nההמרה הושלמה בהצלחה!")
+    print(f"\nההמרה והאנונימיזציה הושלמו בהצלחה!")
     print(f"קובץ Parquet נשמר בנתיב: {output_parquet_path}")
 
 # --- הגדרות ---
@@ -73,14 +113,15 @@ if __name__ == "__main__":
 
     print("\n-----------------------------------------------------")
     print("שימו לב:")
+    print("הנתונים עברו תהליך אנונימיזציה להסרת אימיילים ומספרי טלפון.")
     print(f"הקבצים המקוריים בתיקיה '{INPUT_DIRECTORY}' נשמרו כפי שהם.")
-    print(f"קובץ הפרקט נוצר בתיקיה '{OUTPUT_DIRECTORY}'.")
+    print(f"קובץ הפרקט האנונימי נוצר בתיקיה '{OUTPUT_DIRECTORY}'.")
     print("-----------------------------------------------------")
 
     # דוגמה לקריאת קובץ הפרקט שנוצר (לא חובה, רק לבדיקה)
     try:
         df_read = pd.read_parquet(os.path.join(OUTPUT_DIRECTORY, OUTPUT_PARQUET_FILE))
-        print("\nדוגמה לתוכן קובץ הפרקט שנוצר:")
+        print("\nדוגמה לתוכן קובץ הפרקט שנוצר (לאחר אנונימיזציה):")
         print(df_read)
         print(f"\nמספר רשומות בקובץ הפרקט: {len(df_read)}")
         print(f"עמודות בקובץ הפרקט: {df_read.columns.tolist()}")
