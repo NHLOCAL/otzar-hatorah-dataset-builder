@@ -1,5 +1,3 @@
-# upload_directory_to_hf.py
-
 import os
 import argparse
 from huggingface_hub import HfApi
