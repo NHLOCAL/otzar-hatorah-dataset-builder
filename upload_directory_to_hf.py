@@ -2,7 +2,22 @@ import os
 import argparse
 import tempfile
 from huggingface_hub import HfApi
-from datasets import load_dataset, Features, Value, Sequence, Timestamp
+from datasets import load_dataset, Features, Value, Sequence
+
+FEATURE_DEFS = {
+    "title":            Value("string"),
+    "categories":       Sequence(Value("string")),
+    "author":           Value("string"),
+    # timestamps are defined via Value with the appropriate format
+    "created":          Value("timestamp[s]"),
+    "modified":         Value("timestamp[s]"),
+    "last_modified_by": Value("string"),
+    "title_meta":       Value("string"),
+    "subject":          Value("string"),
+    "creator":          Value("string"),
+    "producer":         Value("string"),
+}
+
 
 def main():
     """
@@ -34,28 +49,14 @@ def main():
 
     hf_token = os.environ.get("HUGGINGFACE_TOKEN")
     if not hf_token:
-        raise ValueError(
-            "HUGGINGFACE_TOKEN environment variable is not set."
-        )
+        raise ValueError("HUGGINGFACE_TOKEN environment variable is not set.")
 
     if not os.path.isdir(args.local_dir):
         raise ValueError(f"The provided local path '{args.local_dir}' is not a directory.")
 
-    # Define explicit schema for JSONL fields
-    features = Features({
-        "title":            Value("string"),
-        "categories":       Sequence(Value("string")),
-        "author":           Value("string"),
-        "created":          Timestamp("s"),
-        "modified":         Timestamp("s"),
-        "last_modified_by": Value("string"),
-        "title_meta":       Value("string"),
-        "subject":          Value("string"),
-        "creator":          Value("string"),
-        "producer":         Value("string"),
-    })
+    # Build Features object
+    features = Features(FEATURE_DEFS)
 
-    # Prepare a temporary directory for converted shards
     with tempfile.TemporaryDirectory() as tmpdir:
         print(f"Converting JSONL shards in {args.local_dir} to explicit schema...")
         shards = [f for f in os.listdir(args.local_dir) if f.lower().endswith('.jsonl')]
@@ -75,7 +76,6 @@ def main():
             ds.to_json(output_path, orient='records', lines=True)
             print(f"  Converted {shard} -> {output_path}")
 
-        # All shards converted, now upload the converted folder
         print("Authenticating with Hugging Face Hub...")
         api = HfApi(token=hf_token)
 
@@ -92,6 +92,7 @@ def main():
     print(
         f"Check your dataset at: https://huggingface.co/datasets/{args.repo_id}/tree/main/{args.path_in_repo}"
     )
+
 
 if __name__ == "__main__":
     main()
