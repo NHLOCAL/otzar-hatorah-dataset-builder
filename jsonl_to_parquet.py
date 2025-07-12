@@ -4,6 +4,13 @@ import pandas as pd
 import pyarrow  # Required by pandas for Parquet I/O
 import re
 
+# --- Constants for Hebrew text processing ---
+# Using frozenset for efficient membership testing ('in')
+FINAL_LETTERS = frozenset('םןץףך')
+# Letters that have a final form but are appearing in their non-final form.
+# A word ending with one of these is strong evidence of reversed text.
+NON_FINAL_EQUIVALENTS = frozenset('כמנפצ')
+
 
 def _pre_process_text(text: str) -> str:
     """
@@ -29,21 +36,40 @@ def fix_hebrew_encoding(text: str) -> str:
 
 
 def detect_and_fix_reversed_hebrew(text: str) -> str:
-    """Detects and corrects reversed (visual) Hebrew text."""
+    """
+    Detects and corrects reversed (visual) Hebrew text using a robust heuristic.
+
+    The heuristic gathers two types of evidence for reversed text:
+    1. Words starting with a final letter (e.g., 'םשול' instead of 'לשום').
+    2. Words ending with a non-final letter that has a final form (e.g., 'ךרב' instead of 'ברך').
+    
+    A decision to reverse the text is made if sufficient evidence is found,
+    relative to the total number of Hebrew words.
+    """
     # Split text by any non-Hebrew character to get potential words.
     words = [word for word in re.split(r'[^א-ת]+', text) if word]
     if not words:
         return text
 
-    final_letters = 'םןץףך'
-    reversed_word_count = sum(
-        1 for word in words if len(word) > 1 and word.startswith(final_letters)
-    )
+    reversed_evidence_score = 0
+    for word in words:
+        if len(word) > 1:
+            # Evidence 1: Word starts with a final letter.
+            if word[0] in FINAL_LETTERS:
+                reversed_evidence_score += 1
+            # Evidence 2: Word ends with a letter that should be in its final form.
+            if word[-1] in NON_FINAL_EQUIVALENTS:
+                reversed_evidence_score += 1
+    
+    # Calculate the ratio of evidence to the number of words.
+    # We use max(1, len(words)) to avoid division by zero.
+    ratio = reversed_evidence_score / len(words)
 
-    # A dynamic threshold helps avoid false positives on short texts.
-    # It requires at least 2 reversed words, or a high ratio for longer texts.
-    ratio = reversed_word_count / len(words)
-    is_likely_reversed = (reversed_word_count >= 2 and ratio > 0.05) or ratio > 0.2
+    # Determine if the text is likely reversed using a threshold.
+    # - Requires at least 3 pieces of evidence to avoid false positives on short texts.
+    # - Requires a significant ratio of evidence (e.g., > 15%).
+    # - A very high ratio (e.g., > 40%) is a strong signal, even with few words.
+    is_likely_reversed = (reversed_evidence_score >= 3 and ratio > 0.15) or ratio > 0.4
 
     return text[::-1] if is_likely_reversed else text
 
@@ -71,10 +97,10 @@ def process_text_field(text: str, cid_threshold: int = 10) -> str | None:
     # Remove (cid:xx) tags before further processing.
     text = re.sub(r'\(cid:\d+\)', '', text)
 
-    # Step 2: Apply sequential cleaning functions.
+    # Step 2: Apply sequential cleaning functions. The order is important.
     processed_text = _pre_process_text(text)
     processed_text = fix_hebrew_encoding(processed_text)
-    processed_text = detect_and_fix_reversed_hebrew(processed_text)
+    processed_text = detect_and_fix_reversed_hebrew(processed_text) # Apply the improved function
 
     return processed_text
 
@@ -153,6 +179,8 @@ def convert_jsonl_to_parquet(input_dir, output_dir, output_filename):
     if 'text' in df.columns:
         initial_count = len(df)
         df.dropna(subset=['text'], inplace=True)
+        # After cleaning, some texts might become empty. Drop them.
+        df = df[df['text'].str.strip() != '']
         if initial_count > 1:
             df.drop_duplicates(subset=['text'], keep='first', inplace=True)
             final_count = len(df)
@@ -183,8 +211,9 @@ if __name__ == "__main__":
         print(f"Successfully read the output file '{output_path}'.")
         print(f"Final record count: {len(df_read)}")
         print(f"Columns: {df_read.columns.tolist()}")
-        print("\nSample of the first 5 records:")
-        print(df_read.head())
+        if not df_read.empty:
+            print("\nSample of the first 5 records:")
+            print(df_read.head())
     except FileNotFoundError:
         print(f"\nError: Could not find the output file at '{output_path}'.")
     except Exception as e:
