@@ -1,55 +1,68 @@
-# התקנת התלויות:
-# pip install docling
+#!/usr/bin/env python3
+"""
+Script to extract Hebrew (RTL) text from a PDF and export it to JSON using Docling.
 
-import os
+This script:
+  - Prompts the user for a source PDF path and a destination JSON path.
+  - Strips surrounding quotes from input paths for Python compatibility.
+  - Uses Docling's DocumentConverter to parse the PDF.
+  - Exports the document structure to a Python dict and saves as JSON.
+  - Saves the resulting JSON with UTF-8 encoding.
+
+Requirements:
+  pip install docling
+
+Usage:
+  python docling_pdf_to_json.py
+"""
+import sys
+import json
 from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
 
 
-def normalize_path(path: str) -> str:
-    """
-    מסיר מרכאות מקיפות (" או ') מהתחלה והסוף, ומחזיר נתיב תקני לפייתון.
-    """
-    # חיתוך של " ו-' משני קצות המחרוזת
-    normalized = path.strip().strip('"').strip("'")
-    # התאמת הנתיב לפורמט מערכת ההפעלה
-    return os.path.normpath(normalized)
+def strip_quotes(path: str) -> str:
+    """Strip surrounding single or double quotes from a string."""
+    return path.strip().strip('"').strip("'")
 
 
-def pdf_to_markdown_reversed_no_ocr(input_pdf_path: str, output_md_path: str):
-    source = input_pdf_path
+def main():
+    # Prompt for source and destination paths
+    src = strip_quotes(input("Enter source PDF path: "))
+    dest = strip_quotes(input("Enter destination JSON path: "))
 
-    # 1. הגדרת אפשרויות עיבוד PDF: מכבים את ה‑OCR
-    pipeline_options = PdfPipelineOptions()
-    pipeline_options.do_ocr = False  # מבטלים OCR לחלוטין
+    # Configure PDF pipeline options (default; enable OCR if needed)
+    pdf_opts = PdfPipelineOptions()
+    # Example: to enable OCR on scanned PDFs, uncomment the following line:
+    # pdf_opts.enable_ocr = True
 
-    # 2. יצירת המרת מסמך עם פורמט PDF מותאם
+    # Create a converter with PDF format options
     converter = DocumentConverter(
         format_options={
-            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_opts)
         }
     )
 
-    # 3. המרה ושמירת התוצאה
-    result = converter.convert(source)
-    markdown = result.document.export_to_markdown()
+    # Convert the PDF
+    try:
+        result = converter.convert(src)
+    except Exception as e:
+        print(f"Error converting PDF: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    # 4. (אופציונלי) הפיכת הסדר של השורות
-    reversed_md = "\n".join(markdown.splitlines()[::-1])
+    # Export to dict (no export_to_json method available)
+    json_data = result.document.export_to_dict()
 
-    # 5. כתיבת הקובץ
-    with open(output_md_path, "w", encoding="utf-8") as f:
-        f.write(reversed_md)
+    # Write to destination file
+    try:
+        with open(dest, 'w', encoding='utf-8') as f:
+            json.dump(json_data, f, ensure_ascii=False, indent=2)
+        print(f"JSON successfully exported to: {dest}")
+    except Exception as e:
+        print(f"Error writing JSON file: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    # קריאת נתיב הקובץ מהמשתמש, עם או בלי מרכאות
-    raw_input_pdf = input("כתובת קובץ ה‑PDF (input): ")
-    raw_output_md = input("כתובת קובץ Markdown (output): ")
-
-    input_pdf = normalize_path(raw_input_pdf)
-    output_md = normalize_path(raw_output_md)
-
-    pdf_to_markdown_reversed_no_ocr(input_pdf, output_md)
-    print(f"✅ ההמרה הושלמה ללא OCR: {output_md}")
+    main()
