@@ -12,6 +12,12 @@ NON_FINAL_EQUIVALENTS = frozenset('כמנפצ')
 
 # Common technical English words that, when reversed, are a very strong sign of reversed text.
 REVERSED_CANARY_WORDS = frozenset([':atad', 'egami', 'ptth', 'lmth', 'gnp/egami'])
+# Hebrew words that, when reversed, are a knockout sign of reversed text.
+HEBREW_REVERSED_CANARIES = frozenset(['אוה', 'רועיש', 'תא'])
+# Hebrew words that, if found, prove the text is CORRECT and should NOT be reversed.
+HEBREW_CORRECT_CANARIES = frozenset(['הוא', 'שיעור', 'את'])
+
+
 
 
 def is_garbled_text(text: str) -> bool:
@@ -53,35 +59,44 @@ def fix_hebrew_encoding(text: str) -> str:
 
 def detect_and_fix_reversed_hebrew(text: str) -> tuple[str, bool]:
     """
-    Detects and corrects reversed Hebrew using a multi-faceted heuristic.
+    Detects and corrects reversed Hebrew using a multi-layered heuristic.
 
-    The heuristic is based on a sample of the first 2000 characters and uses two main checks:
-    1. Canary Words (Knockout Rule): Checks for reversed English technical terms
-       (e.g., 'egami' for 'image'). If found, the text is immediately reversed.
-    2. Final/Non-final letters: The original check for final letters at the start of
-       words or non-final letters at the end.
-
-    If check #1 passes, or if the score from check #2 is high enough (>=3),
-    the entire text is reversed.
+    The logic order is crucial:
+    1. Anti-Reversal Check: Looks for specific correct words (e.g., "שיעור").
+       If found, the text is confirmed as correct and is NOT reversed.
+    2. Knockout Reversal Check: Looks for specific reversed words (e.g., "רועיש").
+       If found, the text is immediately reversed.
+    3. Scoring-based Heuristic: If no knockout rules apply, falls back to the
+       original check for final/non-final letters.
 
     Returns:
         A tuple containing the processed string and a boolean indicating if a reversal occurred.
     """
     sample = text[:2000]
 
-    # 1. High-confidence "canary" check. If this passes, reverse and exit immediately.
+    # 1. Anti-Reversal Check (Highest Priority): If we find a correct canary word,
+    # the text is definitely not reversed. Stop and return as is.
+    for canary in HEBREW_CORRECT_CANARIES:
+        # Use word boundaries (\b) for whole-word matching.
+        if re.search(r'\b' + re.escape(canary) + r'\b', sample):
+            return text, False
+
+    # 2. Knockout Reversal Checks (Second Priority):
+    # A) English technical terms
     for canary in REVERSED_CANARY_WORDS:
         if canary in sample:
             return text[::-1], True
+    # B) Hebrew reversed words
+    for canary in HEBREW_REVERSED_CANARIES:
+        if re.search(r'\b' + re.escape(canary) + r'\b', sample):
+            return text[::-1], True
 
-    # If no canaries are found, proceed to the scoring-based heuristic.
+    # 3. Fallback to Scoring-Based Heuristic (if no knockout rules applied)
     words_to_sample = [word for word in re.split(r'[^א-ת]+', sample) if word]
     if not words_to_sample:
         return text, False
 
     reversed_evidence_score = 0
-
-    # 2. Original heuristic: Check for final/non-final letters.
     for word in words_to_sample:
         if len(word) > 1:
             if word[0] in FINAL_LETTERS:
@@ -89,12 +104,7 @@ def detect_and_fix_reversed_hebrew(text: str) -> tuple[str, bool]:
             if word[-1] in NON_FINAL_EQUIVALENTS:
                 reversed_evidence_score += 1
 
-    # --- הקוד הבא הוסר מהחישוב לפי הבקשה ---
-    # 3. Punctuation heuristic: Check for misplaced punctuation (e.g., " .מילה").
-    # punctuation_evidence = len(re.findall(r'[\.,]\s+[א-ת]', sample))
-    # reversed_evidence_score += punctuation_evidence
-
-    # Final decision based on the combined score.
+    # Final decision based on the score.
     is_likely_reversed = reversed_evidence_score >= 3
     if is_likely_reversed:
         return text[::-1], True
