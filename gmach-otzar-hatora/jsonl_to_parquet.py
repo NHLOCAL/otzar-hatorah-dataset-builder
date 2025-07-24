@@ -67,7 +67,7 @@ def detect_and_fix_reversed_hebrew(text: str) -> str:
     """
     Detects and corrects reversed Hebrew using a multi-faceted heuristic.
 
-    The heuristic is based on a sample of the first 2000 characters and uses three checks:
+    The heuristic is based on a sample of the first 10000 characters and uses three checks:
     1. Canary Words (Knockout Rule): Checks for reversed English technical terms
        (e.g., 'egami' for 'image'). If found, the text is immediately reversed.
     2. Punctuation: Awards points for punctuation appearing before a word (e.g., ".word").
@@ -77,7 +77,7 @@ def detect_and_fix_reversed_hebrew(text: str) -> str:
     If the combined score of evidence from checks #2 and #3 is high enough (>=3),
     or if check #1 passes, the entire text is reversed.
     """
-    sample = text[:2000]
+    sample = text[:10000]
 
     # 1. High-confidence "canary" check. If this passes, reverse and exit immediately.
     for canary in REVERSED_CANARY_WORDS:
