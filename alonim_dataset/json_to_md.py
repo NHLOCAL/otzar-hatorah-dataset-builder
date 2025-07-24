@@ -2,6 +2,27 @@ import json
 import os
 import argparse
 
+# ==============================================================================
+# מילון מרכזי לתיקוני OCR. ניתן להוסיף כאן זוגות של שגיאה:תיקון בעתיד.
+# ==============================================================================
+OCR_CORRECTIONS = {
+    "/uni05DF": "ן",  # תיקון נפוץ לאות נון סופית
+    # דוגמאות לתיקונים עתידיים פוטנציאליים:
+    # "/uni05DD": "ם",
+    # "/uni05DA": "ך",
+}
+# ==============================================================================
+
+def clean_ocr_text(text):
+    """
+    מנקה שגיאות OCR נפוצות ממחרוזת טקסט על בסיס מילון התיקונים.
+    """
+    if not isinstance(text, str):
+        return text
+    for error, correction in OCR_CORRECTIONS.items():
+        text = text.replace(error, correction)
+    return text
+
 def analyze_and_sort_page_elements(page_elements, page_width):
     """
     מנתח את פריסת העמוד (1, 2 או 3 עמודות) וממיין את האלמנטים בהתאם.
@@ -9,14 +30,12 @@ def analyze_and_sort_page_elements(page_elements, page_width):
     if not page_width or not page_elements:
         return [], []
 
-    # הגדרת נקודות חיתוך לשלוש עמודות
     gutter1 = page_width / 3
     gutter2 = page_width * 2 / 3
-    COLUMN_DETECTION_THRESHOLD = 3  # מספר מינימלי של פריטים כדי להגדיר עמודה
+    COLUMN_DETECTION_THRESHOLD = 3
 
     right_col, middle_col, left_col, full_width, footnotes = [], [], [], [], []
 
-    # 1. סיווג אלמנטים לקטגוריות
     for item in page_elements:
         label = item.get('label', '')
         text = item.get('text', '')
@@ -29,19 +48,13 @@ def analyze_and_sort_page_elements(page_elements, page_width):
 
         try:
             bbox = item['prov'][0]['bbox']
-            # סיווג לפי מיקום אופקי
-            if bbox['l'] >= gutter2:
-                right_col.append(item)
-            elif bbox['r'] <= gutter1:
-                left_col.append(item)
-            elif bbox['l'] >= gutter1 and bbox['r'] <= gutter2:
-                middle_col.append(item)
-            else: # פריט שחוצה "גבולות" ייחשב כפריט רחב
-                full_width.append(item)
+            if bbox['l'] >= gutter2: right_col.append(item)
+            elif bbox['r'] <= gutter1: left_col.append(item)
+            elif bbox['l'] >= gutter1 and bbox['r'] <= gutter2: middle_col.append(item)
+            else: full_width.append(item)
         except (KeyError, IndexError):
-            full_width.append(item) # ברירת מחדל לפריטים ללא מיקום
+            full_width.append(item)
 
-    # 2. החלטה על פריסה
     num_cols = 1
     if len(right_col) > COLUMN_DETECTION_THRESHOLD and \
        len(middle_col) > COLUMN_DETECTION_THRESHOLD and \
@@ -53,32 +66,23 @@ def analyze_and_sort_page_elements(page_elements, page_width):
     
     print(f"  [זוהתה פריסת {num_cols} עמודות]")
 
-    # 3. מיון כל קטגוריה בנפרד (מלמעלה למטה)
     sort_key_top_down = lambda item: item.get('prov', [{}])[0].get('bbox', {}).get('t', 0)
     for col in [full_width, right_col, middle_col, left_col, footnotes]:
         col.sort(key=sort_key_top_down, reverse=True)
 
-    # 4. איחוד הפריטים לפי סדר הקריאה הנכון
     sorted_body = []
     if num_cols == 3:
-        sorted_body.extend(full_width)
-        sorted_body.extend(right_col)
-        sorted_body.extend(middle_col)
-        sorted_body.extend(left_col)
+        sorted_body.extend(full_width + right_col + middle_col + left_col)
     elif num_cols == 2:
-        sorted_body.extend(full_width)
-        sorted_body.extend(right_col)
-        # מאחדים את העמודה האמצעית עם השמאלית למקרה של זליגה
         middle_and_left = middle_col + left_col
         middle_and_left.sort(key=sort_key_top_down, reverse=True)
-        sorted_body.extend(middle_and_left)
-    else: # פריסת עמודה אחת
+        sorted_body.extend(full_width + right_col + middle_and_left)
+    else:
         all_body_items = full_width + right_col + middle_col + left_col
-        # מיון מדויק: אנכי (למעלה-למטה), ואז אופקי (ימין-לשמאל)
         all_body_items.sort(key=lambda item: (
-            item.get('prov', [{}])[0].get('bbox', {}).get('t', 0),
-            item.get('prov', [{}])[0].get('bbox', {}).get('r', 0)
-        ), reverse=True)
+            -item.get('prov', [{}])[0].get('bbox', {}).get('t', 0),
+            -item.get('prov', [{}])[0].get('bbox', {}).get('r', 0)
+        ))
         sorted_body.extend(all_body_items)
 
     return sorted_body, footnotes
@@ -92,34 +96,35 @@ def generate_markdown_text(item):
         return ""
 
     if label == 'section_header':
-        level = item.get('level', 2)
-        # מנקה טקסטים מיותרים מהכותרת
-        text = text.split('/uni05DF')[0].strip()
+        level = item.get('level', 1) # שינוי ברירת מחדל לכותרת ראשית יותר
         return f"{'#' * level} {text}\n\n"
     
     if label == 'list_item':
         return f"* {text}\n"
 
     if text.startswith('"') and text.endswith('"'):
-        stripped_text = text.strip('"')
-        return f"> {stripped_text}\n\n"
+        clean_text = text.strip('"')
+        return f"> {clean_text}\n\n"
         
     return f"{text}\n\n"
 
-def process_groups(groups, pages_data):
+def process_groups(groups, pages_data, raw_texts):
     """מוסיף פריטי Group (כמו רשימות) למבנה הנתונים של העמודים."""
     for group in groups:
         if group.get('label') == 'list':
-            for item in group.get('children', []):
-                # מניחים שה-ref הוא תמיד ל-texts
-                text_ref_index = int(item['$ref'].split('/')[-1])
-                list_item_data = next((t for t in data.get('texts', []) if t['self_ref'] == f"#/texts/{text_ref_index}"), None)
+            for item_ref in group.get('children', []):
+                text_ref_index = int(item_ref['$ref'].split('/')[-1])
+                list_item_data = next((t for t in raw_texts if t['self_ref'] == f"#/texts/{text_ref_index}"), None)
+                
                 if list_item_data:
-                    list_item_data['label'] = 'list_item' # מסמנים את הפריט כחלק מרשימה
+                    # מנקים את הטקסט כאן
+                    if 'text' in list_item_data:
+                        list_item_data['text'] = clean_ocr_text(list_item_data['text'])
+                    
+                    list_item_data['label'] = 'list_item'
                     try:
                         page_no = list_item_data['prov'][0]['page_no']
                         if page_no in pages_data:
-                            # מוודאים שהפריט לא כבר קיים (למנוע כפילות)
                             if not any(el['self_ref'] == list_item_data['self_ref'] for el in pages_data[page_no]):
                                 pages_data[page_no].append(list_item_data)
                     except (KeyError, IndexError):
@@ -128,17 +133,14 @@ def process_groups(groups, pages_data):
 def convert_docling_json_to_md(json_path, output_path=None):
     """
     ממיר קובץ JSON במבנה DoclingDocument לקובץ Markdown,
-    תוך זיהוי וטיפול אוטומטי בפריסות של 1, 2 או 3 עמודות.
+    עם תיקון שגיאות OCR וזיהוי פריסה אוטומטי.
     """
-    global data # מאפשר גישה לנתונים הגלובליים מפונקציית process_groups
-
     if not os.path.exists(json_path):
         print(f"שגיאה: קובץ המקור לא נמצא בנתיב '{json_path}'")
         return
 
     if output_path is None:
-        base_name = os.path.splitext(json_path)[0]
-        output_path = base_name + '.md'
+        output_path = os.path.splitext(json_path)[0] + '.md'
 
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
@@ -148,10 +150,15 @@ def convert_docling_json_to_md(json_path, output_path=None):
         return
 
     pages_data = {}
+    raw_texts = data.get('texts', [])
     
-    # מאכלסים את pages_data רק עם פריטים מ-texts שאינם חלק מ-groups
-    initial_texts = [item for item in data.get('texts', []) if 'parent' in item and item['parent']['$ref'] == '#/body']
+    # מאכלסים את pages_data רק עם פריטים שאינם חלק מקבוצות
+    initial_texts = [item for item in raw_texts if 'parent' in item and item['parent']['$ref'] == '#/body']
     for item in initial_texts:
+        # מנקים את הטקסט מיד עם קריאתו
+        if 'text' in item:
+            item['text'] = clean_ocr_text(item['text'])
+            
         try:
             page_no = item['prov'][0]['page_no']
             if page_no not in pages_data:
@@ -161,47 +168,38 @@ def convert_docling_json_to_md(json_path, output_path=None):
             if 1 not in pages_data: pages_data[1] = []
             pages_data[1].append(item)
     
-    # מעבדים את ה-groups ומוסיפים את הפריטים שלהם למבנה pages_data
-    process_groups(data.get('groups', []), pages_data)
+    process_groups(data.get('groups', []), pages_data, raw_texts)
 
     md_content = []
     
     print(f"מתחיל עיבוד של '{os.path.basename(json_path)}'...")
+    if OCR_CORRECTIONS:
+        print(f"  [מבצע {len(OCR_CORRECTIONS)} תיקוני OCR אוטומטיים]")
+
     for page_no in sorted(pages_data.keys()):
         print(f"מעבד עמוד {page_no}...")
         page_elements = pages_data[page_no]
-        page_width = data.get('pages', {}).get(str(page_no), {}).get('size', {}).get('width')
-        
-        if not page_width:
-            print(f"  אזהרה: לא נמצא רוחב עבור עמוד {page_no}. משתמש ברוחב ברירת מחדל.")
-            page_width = 600
+        page_width = data.get('pages', {}).get(str(page_no), {}).get('size', {}).get('width', 600)
 
         sorted_body, sorted_footnotes = analyze_and_sort_page_elements(page_elements, page_width)
-
         md_content.append(f"\n---\n\n<!-- Page {page_no} -->\n\n")
 
-        # איחוד פריטי רשימה רצופים
         is_in_list = False
         for item in sorted_body:
             is_list_item = item.get('label') == 'list_item'
             md_line = generate_markdown_text(item)
 
-            # מוודאים שאין שורות ריקות מיותרות בתוך רשימה
             if is_list_item:
                 md_content.append(md_line)
             else:
-                 # מוסיפים רווח לפני פריט שאינו רשימה אם הפריט הקודם היה ברשימה
-                if is_in_list:
-                    md_content.append('\n')
+                if is_in_list: md_content.append('\n')
                 md_content.append(md_line)
             is_in_list = is_list_item
-
 
         if sorted_footnotes:
             md_content.append("---\n\n")
             for item in sorted_footnotes:
-                text = item.get('text', '').strip()
-                md_content.append(f"*{text}*\n\n")
+                md_content.append(f"*{item.get('text', '').strip()}*\n\n")
 
     try:
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -214,7 +212,7 @@ def convert_docling_json_to_md(json_path, output_path=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="ממיר קובץ Docling JSON לקובץ Markdown, עם זיהוי פריסה אוטומטי (1, 2 או 3 עמודות).",
+        description="ממיר קובץ Docling JSON לקובץ Markdown, עם תיקוני OCR וזיהוי פריסה אוטומטי.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="""
 דוגמאות שימוש:
@@ -232,7 +230,6 @@ def main():
     parser.add_argument("-o", "--output", dest="output_file", help="נתיב לקובץ ה-Markdown שייווצר (אופציונלי).")
     
     args = parser.parse_args()
-    
     source_path = args.source_file
     
     if not source_path:
