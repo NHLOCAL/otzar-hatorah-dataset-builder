@@ -230,17 +230,49 @@ def convert_jsonl_to_parquet(input_dir, output_dir, output_filename):
 
 
 if __name__ == "__main__":
-    INPUT_DIRECTORY = "output_dataset"
-    OUTPUT_DIRECTORY = "converted_parquet"
-    OUTPUT_PARQUET_FILE = "all_data_combined.parquet"
+    import argparse
 
-    convert_jsonl_to_parquet(INPUT_DIRECTORY, OUTPUT_DIRECTORY, OUTPUT_PARQUET_FILE)
+    # הגדרת היכולת לקבל פרמטרים חיצוניים עם ערכי ברירת מחדל
+    parser = argparse.ArgumentParser(
+        description="""Converts JSONL files to a single, cleaned Parquet file.
+                       Runs with default paths if no arguments are provided."""
+    )
+    
+    # הגדרת פרמטרים אופציונליים. אם לא יסופקו, ישומשו ערכי ה-default.
+    parser.add_argument(
+        "--input-dir", 
+        default="output_dataset",  # ברירת המחדל המקורית
+        help="Path to the directory containing the source JSONL files. Defaults to 'output_dataset'."
+    )
+    parser.add_argument(
+        "--output-dir", 
+        default="converted_parquet", # ברירת המחדל המקורית
+        help="Path to the directory where the output Parquet file will be saved. Defaults to 'converted_parquet'."
+    )
+    parser.add_argument(
+        "--output-file", 
+        default="all_data_combined.parquet", 
+        help="The name of the final Parquet file. Defaults to 'all_data_combined.parquet'."
+    )
+    
+    # קריאת הפרמטרים מהפקודה. אם אין, ישומשו ערכי ברירת המחדל.
+    args = parser.parse_args()
+
+    print(f"Using Input Directory: '{args.input_dir}'")
+    print(f"Using Output Directory: '{args.output_dir}'")
+    
+    # קריאה לפונקציה הראשית עם הפרמטרים (בין אם הגיעו מהפקודה או מברירת המחדל)
+    convert_jsonl_to_parquet(args.input_dir, args.output_dir, args.output_file)
 
     print("\n-----------------------------------------------------")
     print("Verification:")
     
+    # ולידציה של קובץ הפלט
     try:
-        output_path = os.path.join(OUTPUT_DIRECTORY, OUTPUT_PARQUET_FILE)
+        output_path = os.path.join(args.output_dir, args.output_file)
+        if not os.path.exists(output_path):
+             raise FileNotFoundError(f"Output file was not created at '{output_path}'")
+        
         df_read = pd.read_parquet(output_path)
         print(f"Successfully read the output file '{output_path}'.")
         print(f"Final record count: {len(df_read)}")
@@ -248,7 +280,7 @@ if __name__ == "__main__":
         if not df_read.empty:
             print("\nSample of the first 5 records:")
             print(df_read.head())
-    except FileNotFoundError:
-        print(f"\nError: Could not find the output file at '{output_path}'.")
+    except FileNotFoundError as e:
+        print(f"\nVerification Error: {e}")
     except Exception as e:
-        print(f"\nError reading the Parquet file: {e}")
+        print(f"\nVerification Error: Could not read the Parquet file: {e}")

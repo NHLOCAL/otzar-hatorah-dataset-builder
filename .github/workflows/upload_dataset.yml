@@ -48,7 +48,11 @@ jobs:
       - name: Convert JSONL to Parquet
         run: |
           echo "Starting conversion from '${{ env.JSONL_SOURCE_DIR }}' to '${{ env.PARQUET_OUTPUT_DIR }}'..."
-          python gmach-otzar-hatora/jsonl_to_parquet.py
+          # הפקודה מעבירה נתיבים מפורשים, שידרסו את ברירות המחדל בסקריפט
+          python gmach-otzar-hatora/jsonl_to_parquet.py \
+            --input-dir ${{ env.JSONL_SOURCE_DIR }} \
+            --output-dir ${{ env.PARQUET_OUTPUT_DIR }} \
+            --output-file "all_data_combined.parquet"
           echo "Conversion complete."
 
       # שלב 5: הרצת סקריפט ההעלאה עם תיקיית ה-Parquet
