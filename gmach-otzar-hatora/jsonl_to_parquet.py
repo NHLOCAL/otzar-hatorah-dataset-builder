@@ -37,22 +37,22 @@ def fix_hebrew_encoding(text: str) -> str:
 
 def detect_and_fix_reversed_hebrew(text: str) -> str:
     """
-    Detects and corrects reversed (visual) Hebrew text using a robust heuristic.
+    Detects and corrects reversed (visual) Hebrew text by sampling the first 500 words.
 
-    The heuristic gathers two types of evidence for reversed text:
-    1. Words starting with a final letter (e.g., 'םשול' instead of 'לשום').
-    2. Words ending with a non-final letter that has a final form (e.g., 'ךרב' instead of 'ברך').
-    
-    A decision to reverse the text is made if sufficient evidence is found,
-    relative to the total number of Hebrew words.
+    If at least 3 pieces of evidence for reversal are found within the first 500
+    Hebrew words, the *entire* text is reversed. Evidence includes:
+    1. Words starting with a final letter (e.g., 'םשול').
+    2. Words ending with a non-final letter that has a final form (e.g., 'ךרב').
     """
     # Split text by any non-Hebrew character to get potential words.
-    words = [word for word in re.split(r'[^א-ת]+', text) if word]
-    if not words:
+    # Sample the first 500 words to make a decision.
+    words_to_sample = [word for word in re.split(r'[^א-ת]+', text) if word][:500]
+    
+    if not words_to_sample:
         return text
 
     reversed_evidence_score = 0
-    for word in words:
+    for word in words_to_sample:
         if len(word) > 1:
             # Evidence 1: Word starts with a final letter.
             if word[0] in FINAL_LETTERS:
@@ -61,16 +61,11 @@ def detect_and_fix_reversed_hebrew(text: str) -> str:
             if word[-1] in NON_FINAL_EQUIVALENTS:
                 reversed_evidence_score += 1
     
-    # Calculate the ratio of evidence to the number of words.
-    # We use max(1, len(words)) to avoid division by zero.
-    ratio = reversed_evidence_score / len(words)
+    # New decision logic: if we found at least 3 pieces of evidence
+    # in our sample, we assume the whole text is reversed.
+    is_likely_reversed = reversed_evidence_score >= 3
 
-    # Determine if the text is likely reversed using a threshold.
-    # - Requires at least 3 pieces of evidence to avoid false positives on short texts.
-    # - Requires a significant ratio of evidence (e.g., > 15%).
-    # - A very high ratio (e.g., > 40%) is a strong signal, even with few words.
-    is_likely_reversed = (reversed_evidence_score >= 3 and ratio > 0.15) or ratio > 0.4
-
+    # Reverse the original, complete text if the sample indicates it's needed.
     return text[::-1] if is_likely_reversed else text
 
 
