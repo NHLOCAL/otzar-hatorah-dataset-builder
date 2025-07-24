@@ -14,12 +14,14 @@ NON_FINAL_EQUIVALENTS = frozenset('כמנפצ')
 
 def is_garbled_text(text: str) -> bool:
     """
-    Detects severely garbled text by sampling the start of the document.
+    Detects severely garbled text based on corruption patterns in the entire document.
 
-    The check is performed on a sample corresponding to the first 500 words.
-    It identifies text that is likely beyond repair by checking for:
-    1. An extremely high density of quotation marks.
-    2. A very low average length of Hebrew word fragments.
+    This function identifies text that is likely beyond repair by checking the full text for:
+    1. An extremely high density of quotation marks (e.g., more than 1 per 20 chars).
+    2. A very low average length of Hebrew word fragments, which often indicates
+       that the text has been improperly split into characters or short sequences.
+    This check is performed on the entire text to catch corruption that may appear
+    after a clean section.
 
     Args:
         text (str): The input text to check.
@@ -31,27 +33,20 @@ def is_garbled_text(text: str) -> bool:
     if len(text) < 100:
         return False
 
-    # Create a sample of words from the beginning of the text to analyze.
-    words_to_sample = [word for word in re.split(r'[^א-ת]+', text) if word][:500]
-
-    # Reconstruct the text sample from the sampled words to check quote density.
-    # This ensures both heuristics are based on the same sample.
-    text_sample = " ".join(words_to_sample)
-    
-    if not text_sample:
-        return False
-
-    # Heuristic 1: High density of quotation marks in the sample.
-    quote_density = text_sample.count('"') / len(text_sample)
-    if quote_density > 0.05:  # If more than 5% of the characters are quotes, it's garbled.
+    # Heuristic 1: High density of quotation marks across the ENTIRE text.
+    # Using a slightly more aggressive threshold to catch problematic cases.
+    quote_density = text.count('"') / len(text)
+    if quote_density > 0.04:  # If more than 4% of the characters are quotes, it's garbled.
         return True
 
-    # Heuristic 2: Very low average word length in the sample.
-    # Check if there are enough words in the sample to make a meaningful decision.
-    if len(words_to_sample) > 50:
-        average_word_length = sum(len(w) for w in words_to_sample) / len(words_to_sample)
-        # Normal Hebrew average word length is ~4. A very low average is a strong signal.
-        if average_word_length < 2.5:
+    # Heuristic 2: Very low average word length across the ENTIRE text.
+    words = [word for word in re.split(r'[^א-ת]+', text) if word]
+    # Check if there are enough words to make a meaningful decision.
+    if len(words) > 50:
+        average_word_length = sum(len(w) for w in words) / len(words)
+        # Normal Hebrew average word length is ~4. A very low average is a strong signal of corruption.
+        # If the text is a mix of clean and garbled, the average will be pulled down.
+        if average_word_length < 2.7:
             return True
 
     return False
@@ -131,6 +126,7 @@ def process_text_field(text: str, cid_threshold: int = 10) -> str | None:
         return text
 
     # Step 1: Drop records that are severely garbled and beyond repair.
+    # This check runs on the entire text to catch widespread corruption.
     if is_garbled_text(text):
         return None
 
