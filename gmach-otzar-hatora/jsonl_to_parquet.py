@@ -12,6 +12,51 @@ FINAL_LETTERS = frozenset('םןץףך')
 NON_FINAL_EQUIVALENTS = frozenset('כמנפצ')
 
 
+def is_garbled_text(text: str) -> bool:
+    """
+    Detects severely garbled text by sampling the start of the document.
+
+    The check is performed on a sample corresponding to the first 500 words.
+    It identifies text that is likely beyond repair by checking for:
+    1. An extremely high density of quotation marks.
+    2. A very low average length of Hebrew word fragments.
+
+    Args:
+        text (str): The input text to check.
+
+    Returns:
+        True if the text is likely garbled and should be dropped, False otherwise.
+    """
+    # Don't run on very short strings to avoid false positives.
+    if len(text) < 100:
+        return False
+
+    # Create a sample of words from the beginning of the text to analyze.
+    words_to_sample = [word for word in re.split(r'[^א-ת]+', text) if word][:500]
+
+    # Reconstruct the text sample from the sampled words to check quote density.
+    # This ensures both heuristics are based on the same sample.
+    text_sample = " ".join(words_to_sample)
+    
+    if not text_sample:
+        return False
+
+    # Heuristic 1: High density of quotation marks in the sample.
+    quote_density = text_sample.count('"') / len(text_sample)
+    if quote_density > 0.05:  # If more than 5% of the characters are quotes, it's garbled.
+        return True
+
+    # Heuristic 2: Very low average word length in the sample.
+    # Check if there are enough words in the sample to make a meaningful decision.
+    if len(words_to_sample) > 50:
+        average_word_length = sum(len(w) for w in words_to_sample) / len(words_to_sample)
+        # Normal Hebrew average word length is ~4. A very low average is a strong signal.
+        if average_word_length < 2.5:
+            return True
+
+    return False
+
+
 def _pre_process_text(text: str) -> str:
     """
     Performs preliminary cleaning on a text string.
@@ -85,17 +130,21 @@ def process_text_field(text: str, cid_threshold: int = 10) -> str | None:
     if not isinstance(text, str):
         return text
 
-    # Step 1: Drop records that are too corrupted to be useful.
+    # Step 1: Drop records that are severely garbled and beyond repair.
+    if is_garbled_text(text):
+        return None
+
+    # Step 2: Drop records that are too corrupted with (cid:) tags.
     if text.count('(cid:') > cid_threshold:
         return None
 
     # Remove (cid:xx) tags before further processing.
     text = re.sub(r'\(cid:\d+\)', '', text)
 
-    # Step 2: Apply sequential cleaning functions. The order is important.
+    # Step 3: Apply sequential cleaning functions. The order is important.
     processed_text = _pre_process_text(text)
     processed_text = fix_hebrew_encoding(processed_text)
-    processed_text = detect_and_fix_reversed_hebrew(processed_text) # Apply the improved function
+    processed_text = detect_and_fix_reversed_hebrew(processed_text)
 
     return processed_text
 
