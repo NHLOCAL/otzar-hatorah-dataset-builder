@@ -1,14 +1,14 @@
 name: Convert and Upload Dataset to Hugging Face
 
 on:
-  # הפעלה אוטומטית כאשר יש push לענף הראשי שמשנה קבצים בתיקיית הפלט
+  # הפעלה אוטומטית כאשר יש push לענף הראשי שמשנה קבצים בתיקיית המשנה
   push:
     branches:
       - main
     paths:
-      - 'output_dataset/**'
-      - 'upload_directory_to_hf.py'
-      - 'jsonl_to_parquet.py'
+      - 'gmach-otzar-hatora/output_dataset/**'
+      - 'gmach-otzar-hatora/upload_directory_to_hf.py'
+      - 'gmach-otzar-hatora/jsonl_to_parquet.py'
   
   # הפעלה ידנית דרך ממשק ה-Actions ב-GitHub
   workflow_dispatch:
@@ -17,9 +17,9 @@ env:
   # הגדר כאן את שם ריפו הדאטהסט שלך ב-Hugging Face
   HF_DATASET_REPO_ID: "nhlocal/otzar-hatorah"
   # שם התיקייה המקומית שמכילה את קבצי ה-JSONL
-  JSONL_SOURCE_DIR: "output_dataset"
+  JSONL_SOURCE_DIR: "gmach-otzar-hatora/output_dataset"
   # שם התיקייה אליה יכתבו קבצי ה-Parquet
-  PARQUET_OUTPUT_DIR: "converted_parquet"
+  PARQUET_OUTPUT_DIR: "gmach-otzar-hatora/converted_parquet"
 
 jobs:
   build-and-upload:
@@ -41,13 +41,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # הנתיב לקובץ הדרישות נשאר כפי שהיה, בהנחה שהוא בתיקייה הראשית
           pip install -r requirements.txt
 
       # שלב 4: המרת קבצי JSONL לפורמט Parquet
       - name: Convert JSONL to Parquet
         run: |
           echo "Starting conversion from '${{ env.JSONL_SOURCE_DIR }}' to '${{ env.PARQUET_OUTPUT_DIR }}'..."
-          python jsonl_to_parquet.py
+          python gmach-otzar-hatora/jsonl_to_parquet.py
           echo "Conversion complete."
 
       # שלב 5: הרצת סקריפט ההעלאה עם תיקיית ה-Parquet
@@ -57,6 +58,6 @@ jobs:
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
           echo "Uploading directory '${{ env.PARQUET_OUTPUT_DIR }}' to Hugging Face..."
-          python upload_directory_to_hf.py \
+          python gmach-otzar-hatora/upload_directory_to_hf.py \
             --repo-id ${{ env.HF_DATASET_REPO_ID }} \
             --local-dir ${{ env.PARQUET_OUTPUT_DIR }}
