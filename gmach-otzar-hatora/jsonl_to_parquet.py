@@ -13,9 +13,9 @@ NON_FINAL_EQUIVALENTS = frozenset('כמנפצ')
 # Common technical English words that, when reversed, are a very strong sign of reversed text.
 REVERSED_CANARY_WORDS = frozenset([':atad', 'egami', 'ptth', 'lmth', 'gnp/egami'])
 # Hebrew words that, when reversed, are a knockout sign of reversed text.
-HEBREW_REVERSED_CANARIES = frozenset(['אוה', 'רועיש', 'תא'])
+HEBREW_REVERSED_CANARIES = frozenset(['אוה', 'רועיש', 'תא', 'הזש', 'רוסא'])
 # Hebrew words that, if found, prove the text is CORRECT and should NOT be reversed.
-HEBREW_CORRECT_CANARIES = frozenset(['הוא', 'שיעור', 'את'])
+HEBREW_CORRECT_CANARIES = frozenset(['הוא', 'שיעור', 'את', 'שזה', 'אסור'])
 
 
 
