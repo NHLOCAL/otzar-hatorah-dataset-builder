@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - alonim
     paths:
       - 'gmach-otzar-hatora/output_dataset/**'
       - 'gmach-otzar-hatora/upload_directory_to_hf.py'
