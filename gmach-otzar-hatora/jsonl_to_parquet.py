@@ -3,6 +3,7 @@ import json
 import pandas as pd
 import pyarrow  # Required by pandas for Parquet I/O
 import re
+import argparse
 
 # --- Constants for Hebrew text processing ---
 # Using frozenset for efficient membership testing ('in')
@@ -10,25 +11,12 @@ FINAL_LETTERS = frozenset('םןץףך')
 NON_FINAL_EQUIVALENTS = frozenset('כמנפצ')
 
 # Common technical English words that, when reversed, are a very strong sign of reversed text.
-# This acts as a high-confidence "knockout" check.
 REVERSED_CANARY_WORDS = frozenset([':atad', 'egami', 'ptth', 'lmth', 'gnp/egami'])
 
 
 def is_garbled_text(text: str) -> bool:
     """
     Detects severely garbled text based on corruption patterns in the entire document.
-
-    This function identifies text that is likely beyond repair by checking the full text for:
-    1. An extremely high density of quotation marks (e.g., more than 1 per 20 chars).
-    2. A very low average length of Hebrew word fragments.
-    This check is performed on the entire text to catch corruption that may appear
-    after a clean section.
-
-    Args:
-        text (str): The input text to check.
-
-    Returns:
-        True if the text is likely garbled and should be dropped, False otherwise.
     """
     if len(text) < 100:
         return False
@@ -63,35 +51,28 @@ def fix_hebrew_encoding(text: str) -> str:
         return text
 
 
-def detect_and_fix_reversed_hebrew(text: str) -> str:
+def detect_and_fix_reversed_hebrew(text: str) -> tuple[str, bool]:
     """
     Detects and corrects reversed Hebrew using a multi-faceted heuristic.
 
-    The heuristic is based on a sample of the first 10000 characters and uses three checks:
-    1. Canary Words (Knockout Rule): Checks for reversed English technical terms
-       (e.g., 'egami' for 'image'). If found, the text is immediately reversed.
-    2. Punctuation: Awards points for punctuation appearing before a word (e.g., ".word").
-    3. Final/Non-final letters: The original check for final letters at the start of
-       words or non-final letters at the end.
-
-    If the combined score of evidence from checks #2 and #3 is high enough (>=3),
-    or if check #1 passes, the entire text is reversed.
+    Returns:
+        A tuple containing the processed string and a boolean indicating if a reversal occurred.
     """
     sample = text[:10000]
 
-    # 1. High-confidence "canary" check. If this passes, reverse and exit immediately.
+    # 1. High-confidence "canary" check.
     for canary in REVERSED_CANARY_WORDS:
         if canary in sample:
-            return text[::-1]
+            return text[::-1], True
 
-    # If no canaries are found, proceed to the scoring-based heuristic.
+    # 2. Scoring-based heuristic.
     words_to_sample = [word for word in re.split(r'[^א-ת]+', sample) if word]
     if not words_to_sample:
-        return text
+        return text, False
 
     reversed_evidence_score = 0
 
-    # 2. Original heuristic: Check for final/non-final letters.
+    # Check for final/non-final letters.
     for word in words_to_sample:
         if len(word) > 1:
             if word[0] in FINAL_LETTERS:
@@ -99,39 +80,37 @@ def detect_and_fix_reversed_hebrew(text: str) -> str:
             if word[-1] in NON_FINAL_EQUIVALENTS:
                 reversed_evidence_score += 1
 
-    # 3. Punctuation heuristic: Check for misplaced punctuation (e.g., " .מילה").
-    # This is a strong indicator of reversed text.
+    # Check for misplaced punctuation.
     punctuation_evidence = len(re.findall(r'[\.,]\s+[א-ת]', sample))
     reversed_evidence_score += punctuation_evidence
 
     # Final decision based on the combined score.
-    is_likely_reversed = reversed_evidence_score >= 3
-    return text[::-1] if is_likely_reversed else text
+    is_likely_reversed = reversed_evidence_score >= 5
+    if is_likely_reversed:
+        return text[::-1], True
+    else:
+        return text, False
 
 
-def process_text_field(text: str, cid_threshold: int = 10) -> str | None:
+def process_text_field(text: str, cid_threshold: int = 10) -> tuple[str | None, bool]:
     """
     Applies a full cleaning and normalization pipeline to a text field.
 
-    Args:
-        text (str): The input text to process.
-        cid_threshold (int): The maximum allowed number of '(cid:)' tags.
-            If exceeded, the function returns None to signal the record
-            should be dropped.
-
     Returns:
-        A cleaned and corrected string, or None if the text is too corrupted.
+        A tuple containing the cleaned string (or None if too corrupted)
+        and a boolean indicating if the text was reversed.
     """
+    was_reversed = False
     if not isinstance(text, str):
-        return text
+        return text, was_reversed
 
     # Step 1: Drop records that are severely garbled and beyond repair.
     if is_garbled_text(text):
-        return None
+        return None, was_reversed
 
     # Step 2: Drop records that are too corrupted with (cid:) tags.
     if text.count('(cid:') > cid_threshold:
-        return None
+        return None, was_reversed
 
     # Remove (cid:xx) tags before further processing.
     text = re.sub(r'\(cid:\d+\)', '', text)
@@ -139,9 +118,9 @@ def process_text_field(text: str, cid_threshold: int = 10) -> str | None:
     # Step 3: Apply sequential cleaning functions. The order is important.
     processed_text = _pre_process_text(text)
     processed_text = fix_hebrew_encoding(processed_text)
-    processed_text = detect_and_fix_reversed_hebrew(processed_text)
+    processed_text, was_reversed = detect_and_fix_reversed_hebrew(processed_text)
 
-    return processed_text
+    return processed_text, was_reversed
 
 
 def anonymize_record(record: dict) -> dict:
@@ -169,6 +148,7 @@ def convert_jsonl_to_parquet(input_dir, output_dir, output_filename):
 
     all_records = []
     skipped_count = 0
+    reversed_count = 0  # Initialize counter for reversed texts
     
     jsonl_files = [f for f in os.listdir(input_dir) if f.endswith(".jsonl")]
 
@@ -186,7 +166,10 @@ def convert_jsonl_to_parquet(input_dir, output_dir, output_filename):
                     record = json.loads(line)
                     text_content = record.get('text')
 
-                    processed_text = process_text_field(text_content)
+                    processed_text, was_reversed = process_text_field(text_content)
+
+                    if was_reversed:
+                        reversed_count += 1
 
                     if processed_text is None:
                         skipped_count += 1
@@ -208,6 +191,8 @@ def convert_jsonl_to_parquet(input_dir, output_dir, output_filename):
     print(f"\nCollected {len(all_records)} valid records.")
     if skipped_count > 0:
         print(f"Skipped {skipped_count} records due to excessive corruption.")
+    if reversed_count > 0:
+        print(f"Corrected and reversed {reversed_count} text records.")
 
     df = pd.DataFrame(all_records)
 
@@ -230,8 +215,6 @@ def convert_jsonl_to_parquet(input_dir, output_dir, output_filename):
 
 
 if __name__ == "__main__":
-    import argparse
-
     # הגדרת היכולת לקבל פרמטרים חיצוניים עם ערכי ברירת מחדל
     parser = argparse.ArgumentParser(
         description="""Converts JSONL files to a single, cleaned Parquet file.
