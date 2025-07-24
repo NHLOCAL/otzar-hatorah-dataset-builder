@@ -7,9 +7,11 @@ import re
 # --- Constants for Hebrew text processing ---
 # Using frozenset for efficient membership testing ('in')
 FINAL_LETTERS = frozenset('םןץףך')
-# Letters that have a final form but are appearing in their non-final form.
-# A word ending with one of these is strong evidence of reversed text.
 NON_FINAL_EQUIVALENTS = frozenset('כמנפצ')
+
+# Common technical English words that, when reversed, are a very strong sign of reversed text.
+# This acts as a high-confidence "knockout" check.
+REVERSED_CANARY_WORDS = frozenset([':atad', 'egami', 'ptth', 'lmth', 'gnp/egami'])
 
 
 def is_garbled_text(text: str) -> bool:
@@ -18,8 +20,7 @@ def is_garbled_text(text: str) -> bool:
 
     This function identifies text that is likely beyond repair by checking the full text for:
     1. An extremely high density of quotation marks (e.g., more than 1 per 20 chars).
-    2. A very low average length of Hebrew word fragments, which often indicates
-       that the text has been improperly split into characters or short sequences.
+    2. A very low average length of Hebrew word fragments.
     This check is performed on the entire text to catch corruption that may appear
     after a clean section.
 
@@ -29,23 +30,16 @@ def is_garbled_text(text: str) -> bool:
     Returns:
         True if the text is likely garbled and should be dropped, False otherwise.
     """
-    # Don't run on very short strings to avoid false positives.
     if len(text) < 100:
         return False
 
-    # Heuristic 1: High density of quotation marks across the ENTIRE text.
-    # Using a slightly more aggressive threshold to catch problematic cases.
     quote_density = text.count('"') / len(text)
-    if quote_density > 0.04:  # If more than 4% of the characters are quotes, it's garbled.
+    if quote_density > 0.04:
         return True
 
-    # Heuristic 2: Very low average word length across the ENTIRE text.
     words = [word for word in re.split(r'[^א-ת]+', text) if word]
-    # Check if there are enough words to make a meaningful decision.
     if len(words) > 50:
         average_word_length = sum(len(w) for w in words) / len(words)
-        # Normal Hebrew average word length is ~4. A very low average is a strong signal of corruption.
-        # If the text is a mix of clean and garbled, the average will be pulled down.
         if average_word_length < 2.7:
             return True
 
@@ -55,12 +49,8 @@ def is_garbled_text(text: str) -> bool:
 def _pre_process_text(text: str) -> str:
     """
     Performs preliminary cleaning on a text string.
-
-    - Removes (cid:xx) tags, which are common artifacts from PDF conversions.
     - Joins "broken" lines of single Hebrew characters into continuous words.
     """
-    # Fix "vertically-spelled" text by joining Hebrew letters across newlines.
-    # e.g., 'ש\nל\nו\nם' becomes 'שלום'
     processed_text = re.sub(r'(?<=[א-ת])\n(?=[א-ת])', '', text)
     return processed_text
 
@@ -68,44 +58,54 @@ def _pre_process_text(text: str) -> str:
 def fix_hebrew_encoding(text: str) -> str:
     """Attempts to fix text that was decoded with the wrong encoding."""
     try:
-        # This handles the common case of windows-1255 text being misread as latin-1.
         return text.encode('latin-1').decode('windows-1255')
     except (UnicodeEncodeError, UnicodeDecodeError):
-        # The text was likely already in a correct format (e.g., UTF-8).
         return text
 
 
 def detect_and_fix_reversed_hebrew(text: str) -> str:
     """
-    Detects and corrects reversed (visual) Hebrew text by sampling the first 500 words.
+    Detects and corrects reversed Hebrew using a multi-faceted heuristic.
 
-    If at least 3 pieces of evidence for reversal are found within the first 500
-    Hebrew words, the *entire* text is reversed. Evidence includes:
-    1. Words starting with a final letter (e.g., 'םשול').
-    2. Words ending with a non-final letter that has a final form (e.g., 'ךרב').
+    The heuristic is based on a sample of the first 2000 characters and uses three checks:
+    1. Canary Words (Knockout Rule): Checks for reversed English technical terms
+       (e.g., 'egami' for 'image'). If found, the text is immediately reversed.
+    2. Punctuation: Awards points for punctuation appearing before a word (e.g., ".word").
+    3. Final/Non-final letters: The original check for final letters at the start of
+       words or non-final letters at the end.
+
+    If the combined score of evidence from checks #2 and #3 is high enough (>=3),
+    or if check #1 passes, the entire text is reversed.
     """
-    # Split text by any non-Hebrew character to get potential words.
-    # Sample the first 500 words to make a decision.
-    words_to_sample = [word for word in re.split(r'[^א-ת]+', text) if word][:500]
-    
+    sample = text[:2000]
+
+    # 1. High-confidence "canary" check. If this passes, reverse and exit immediately.
+    for canary in REVERSED_CANARY_WORDS:
+        if canary in sample:
+            return text[::-1]
+
+    # If no canaries are found, proceed to the scoring-based heuristic.
+    words_to_sample = [word for word in re.split(r'[^א-ת]+', sample) if word]
     if not words_to_sample:
         return text
 
     reversed_evidence_score = 0
+
+    # 2. Original heuristic: Check for final/non-final letters.
     for word in words_to_sample:
         if len(word) > 1:
-            # Evidence 1: Word starts with a final letter.
             if word[0] in FINAL_LETTERS:
                 reversed_evidence_score += 1
-            # Evidence 2: Word ends with a letter that should be in its final form.
             if word[-1] in NON_FINAL_EQUIVALENTS:
                 reversed_evidence_score += 1
-    
-    # New decision logic: if we found at least 3 pieces of evidence
-    # in our sample, we assume the whole text is reversed.
-    is_likely_reversed = reversed_evidence_score >= 3
 
-    # Reverse the original, complete text if the sample indicates it's needed.
+    # 3. Punctuation heuristic: Check for misplaced punctuation (e.g., " .מילה").
+    # This is a strong indicator of reversed text.
+    punctuation_evidence = len(re.findall(r'[\.,]\s+[א-ת]', sample))
+    reversed_evidence_score += punctuation_evidence
+
+    # Final decision based on the combined score.
+    is_likely_reversed = reversed_evidence_score >= 3
     return text[::-1] if is_likely_reversed else text
 
 
@@ -126,7 +126,6 @@ def process_text_field(text: str, cid_threshold: int = 10) -> str | None:
         return text
 
     # Step 1: Drop records that are severely garbled and beyond repair.
-    # This check runs on the entire text to catch widespread corruption.
     if is_garbled_text(text):
         return None
 
@@ -164,9 +163,6 @@ def anonymize_record(record: dict) -> dict:
 def convert_jsonl_to_parquet(input_dir, output_dir, output_filename):
     """
     Converts JSONL files to a single, cleaned Parquet file.
-
-    The process includes text cleaning, fixing encoding/reversal issues,
-    anonymization, and deduplication based on the final text content.
     """
     os.makedirs(output_dir, exist_ok=True)
     print(f"Output directory is ready: {output_dir}")
@@ -219,7 +215,6 @@ def convert_jsonl_to_parquet(input_dir, output_dir, output_filename):
     if 'text' in df.columns:
         initial_count = len(df)
         df.dropna(subset=['text'], inplace=True)
-        # After cleaning, some texts might become empty. Drop them.
         df = df[df['text'].str.strip() != '']
         if initial_count > 1:
             df.drop_duplicates(subset=['text'], keep='first', inplace=True)
@@ -244,7 +239,6 @@ if __name__ == "__main__":
     print("\n-----------------------------------------------------")
     print("Verification:")
     
-    # Attempt to read the created Parquet file for a quick check.
     try:
         output_path = os.path.join(OUTPUT_DIRECTORY, OUTPUT_PARQUET_FILE)
         df_read = pd.read_parquet(output_path)
