@@ -55,24 +55,33 @@ def detect_and_fix_reversed_hebrew(text: str) -> tuple[str, bool]:
     """
     Detects and corrects reversed Hebrew using a multi-faceted heuristic.
 
+    The heuristic is based on a sample of the first 2000 characters and uses two main checks:
+    1. Canary Words (Knockout Rule): Checks for reversed English technical terms
+       (e.g., 'egami' for 'image'). If found, the text is immediately reversed.
+    2. Final/Non-final letters: The original check for final letters at the start of
+       words or non-final letters at the end.
+
+    If check #1 passes, or if the score from check #2 is high enough (>=3),
+    the entire text is reversed.
+
     Returns:
         A tuple containing the processed string and a boolean indicating if a reversal occurred.
     """
-    sample = text[:10000]
+    sample = text[:2000]
 
-    # 1. High-confidence "canary" check.
+    # 1. High-confidence "canary" check. If this passes, reverse and exit immediately.
     for canary in REVERSED_CANARY_WORDS:
         if canary in sample:
             return text[::-1], True
 
-    # 2. Scoring-based heuristic.
+    # If no canaries are found, proceed to the scoring-based heuristic.
     words_to_sample = [word for word in re.split(r'[^א-ת]+', sample) if word]
     if not words_to_sample:
         return text, False
 
     reversed_evidence_score = 0
 
-    # Check for final/non-final letters.
+    # 2. Original heuristic: Check for final/non-final letters.
     for word in words_to_sample:
         if len(word) > 1:
             if word[0] in FINAL_LETTERS:
@@ -80,12 +89,13 @@ def detect_and_fix_reversed_hebrew(text: str) -> tuple[str, bool]:
             if word[-1] in NON_FINAL_EQUIVALENTS:
                 reversed_evidence_score += 1
 
-    # Check for misplaced punctuation.
-    punctuation_evidence = len(re.findall(r'[\.,]\s+[א-ת]', sample))
-    reversed_evidence_score += punctuation_evidence
+    # --- הקוד הבא הוסר מהחישוב לפי הבקשה ---
+    # 3. Punctuation heuristic: Check for misplaced punctuation (e.g., " .מילה").
+    # punctuation_evidence = len(re.findall(r'[\.,]\s+[א-ת]', sample))
+    # reversed_evidence_score += punctuation_evidence
 
     # Final decision based on the combined score.
-    is_likely_reversed = reversed_evidence_score >= 5
+    is_likely_reversed = reversed_evidence_score >= 3
     if is_likely_reversed:
         return text[::-1], True
     else:
