@@ -72,7 +72,7 @@ def detect_and_fix_reversed_hebrew(text: str) -> tuple[str, bool]:
     Returns:
         A tuple containing the processed string and a boolean indicating if a reversal occurred.
     """
-    sample = text[:2000]
+    sample = text[:5000]
 
     # 1. Anti-Reversal Check (Highest Priority): If we find a correct canary word,
     # the text is definitely not reversed. Stop and return as is.
