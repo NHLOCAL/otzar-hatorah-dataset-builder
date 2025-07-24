@@ -1,27 +1,25 @@
 import json
 import os
 import argparse
-
-# ==============================================================================
-# מילון מרכזי לתיקוני OCR. ניתן להוסיף כאן זוגות של שגיאה:תיקון בעתיד.
-# ==============================================================================
-OCR_CORRECTIONS = {
-    "/uni05DF": "ן",  # תיקון נפוץ לאות נון סופית
-    # דוגמאות לתיקונים עתידיים פוטנציאליים:
-    # "/uni05DD": "ם",
-    # "/uni05DA": "ך",
-}
-# ==============================================================================
+import re
 
 def clean_ocr_text(text):
     """
-    מנקה שגיאות OCR נפוצות ממחרוזת טקסט על בסיס מילון התיקונים.
+    מנקה שגיאות OCR ומתקן אוטומטית תווי יוניקוד פגומים (למשל, /uni05DF ל-ן).
     """
     if not isinstance(text, str):
         return text
-    for error, correction in OCR_CORRECTIONS.items():
-        text = text.replace(error, correction)
-    return text
+
+    # פונקציית עזר להמרה מ-hex לתו, לשימוש עם re.sub
+    def replace_unicode(match):
+        hex_code = match.group(1)
+        try:
+            return chr(int(hex_code, 16))
+        except ValueError:
+            return match.group(0)  # אם ההמרה נכשלת, משאירים את המקור
+
+    # החלפה אוטומטית של כל המופעים של /uniXXXX
+    return re.sub(r'/uni([0-9a-fA-F]{4})', replace_unicode, text)
 
 def analyze_and_sort_page_elements(page_elements, page_width):
     """
@@ -96,7 +94,8 @@ def generate_markdown_text(item):
         return ""
 
     if label == 'section_header':
-        level = item.get('level', 1) # שינוי ברירת מחדל לכותרת ראשית יותר
+        # שימוש ברמה 1 כברירת מחדל כדי להבליט כותרות ראשיות
+        level = item.get('level', 1) 
         return f"{'#' * level} {text}\n\n"
     
     if label == 'list_item':
@@ -117,7 +116,6 @@ def process_groups(groups, pages_data, raw_texts):
                 list_item_data = next((t for t in raw_texts if t['self_ref'] == f"#/texts/{text_ref_index}"), None)
                 
                 if list_item_data:
-                    # מנקים את הטקסט כאן
                     if 'text' in list_item_data:
                         list_item_data['text'] = clean_ocr_text(list_item_data['text'])
                     
@@ -152,10 +150,8 @@ def convert_docling_json_to_md(json_path, output_path=None):
     pages_data = {}
     raw_texts = data.get('texts', [])
     
-    # מאכלסים את pages_data רק עם פריטים שאינם חלק מקבוצות
     initial_texts = [item for item in raw_texts if 'parent' in item and item['parent']['$ref'] == '#/body']
     for item in initial_texts:
-        # מנקים את הטקסט מיד עם קריאתו
         if 'text' in item:
             item['text'] = clean_ocr_text(item['text'])
             
@@ -173,8 +169,7 @@ def convert_docling_json_to_md(json_path, output_path=None):
     md_content = []
     
     print(f"מתחיל עיבוד של '{os.path.basename(json_path)}'...")
-    if OCR_CORRECTIONS:
-        print(f"  [מבצע {len(OCR_CORRECTIONS)} תיקוני OCR אוטומטיים]")
+    print("  [מבצע תיקוני OCR ותווי יוניקוד אוטומטיים]")
 
     for page_no in sorted(pages_data.keys()):
         print(f"מעבד עמוד {page_no}...")
