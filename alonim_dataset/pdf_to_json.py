@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-Wraps the Docling CLI’s Typer app so you only pass in the PDF path,
+Wraps the Docling CLI so you pass only the PDF path,
 and it auto‑injects:
   --no-ocr --pdf-backend pypdfium2 --image-export-mode placeholder
-  --to json --output <temp-dir>
-Then moves the resulting <basename>.json into <basename>.json alongside the PDF.
+  --to json --output <same-folder-as-PDF>
 """
 
 import sys
 import os
-import tempfile
-import shutil
 from pathlib import Path
 from docling.cli.main import app
 
@@ -18,7 +15,7 @@ def strip_quotes(path: str) -> str:
     return path.strip().strip('"').strip("'")
 
 def main():
-    # 1️ Read only the PDF path from the user
+    # 1️ Read only the PDF path
     if len(sys.argv) > 1:
         raw = sys.argv[1]
     else:
@@ -30,14 +27,10 @@ def main():
         print(f"Error: Source file not found at '{src_path}'", file=sys.stderr)
         sys.exit(1)
 
-    # 3️ Determine the final JSON path
-    base = Path(src_path).with_suffix("")
-    dest_path = base.with_suffix(".json")
+    # 3️ Determine the output directory
+    output_dir = Path(src_path).parent
 
-    # 4️ Make a temporary directory for Docling output
-    temp_out = tempfile.mkdtemp(prefix="docling_out_")
-
-    # 5️ Auto‑inject all Docling flags to sys.argv
+    # 4️ Auto‑inject all Docling flags, pointing output at the PDF’s folder
     sys.argv = [
         "docling",
         "--no-ocr",
@@ -45,35 +38,16 @@ def main():
         "--image-export-mode", "placeholder",
         src_path,
         "--to", "json",
-        "--output", temp_out,     # must be a directory
+        "--output", str(output_dir),
     ]
 
-    # 6️ Run the CLI’s Typer app
+    # 5️ Invoke the same Typer app behind `docling` CLI
     try:
         app()
+        print(f"Success! JSON written to: {output_dir / (Path(src_path).stem + '.json')}")
     except Exception as e:
-        # Clean up on error
-        shutil.rmtree(temp_out, ignore_errors=True)
         print(f"Error during conversion: {e}", file=sys.stderr)
         sys.exit(1)
-
-    # 7️ Locate the generated JSON inside temp_out
-    generated = Path(temp_out) / (base.name + ".json")
-    if not generated.is_file():
-        shutil.rmtree(temp_out, ignore_errors=True)
-        print(f"Error: expected output not found at '{generated}'", file=sys.stderr)
-        sys.exit(1)
-
-    # 8️ Move it to the desired dest_path (overwriting if necessary)
-    try:
-        shutil.move(str(generated), str(dest_path))
-        print(f"Success! JSON exported to:\n{dest_path}")
-    except Exception as e:
-        print(f"Error moving JSON file: {e}", file=sys.stderr)
-        sys.exit(1)
-    finally:
-        # 9️ Clean up the temporary directory
-        shutil.rmtree(temp_out, ignore_errors=True)
 
 if __name__ == "__main__":
     main()
