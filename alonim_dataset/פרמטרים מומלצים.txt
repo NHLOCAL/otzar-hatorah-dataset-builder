@@ -1,0 +1,1 @@
+docling --to json --from pdf --no-ocr --pdf-backend pypdfium2 --image-export-mode placeholder <נתיב קובץ>
