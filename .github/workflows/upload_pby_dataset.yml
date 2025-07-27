@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - alonim
     paths:
       - 'project-ben-yehuda/output_jsonl/**'
   
