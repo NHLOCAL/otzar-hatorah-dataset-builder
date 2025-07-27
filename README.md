@@ -1,21 +1,28 @@
 <p align="center">
+  <!-- Hugging Face Datasets -->
   <a href="https://huggingface.co/datasets/nhlocal/otzar-hatorah">
-    <img src="https://huggingface.co/datasets/nhlocal/otzar-hatorah/badge.svg" alt="Otzar HaTorah Dataset">
+    <img alt="Otzar HaTorah on Hugging Face" src="https://img.shields.io/badge/HuggingFace-Otzar%20HaTorah-yellow?logo=huggingface&style=flat">
   </a>
   <a href="https://huggingface.co/datasets/nhlocal/project-ben-yehuda">
-    <img src="https://huggingface.co/datasets/nhlocal/project-ben-yehuda/badge.svg" alt="Project Ben-Yehuda Dataset">
+    <img alt="Project Ben-Yehuda on Hugging Face" src="https://img.shields.io/badge/HuggingFace-Project%20Ben--Yehuda-yellow?logo=huggingface&style=flat">
   </a>
+
+  <!-- GitHub Actions: CI status -->
   <a href="https://github.com/NHLOCAL/The-Digital-Genizah/actions/workflows/upload_dataset.yml">
-    <img src="https://github.com/NHLOCAL/The-Digital-Genizah/actions/workflows/upload_dataset.yml/badge.svg" alt="Otzar HaTorah Build Status">
+    <img alt="Build: Otzar HaTorah" src="https://github.com/NHLOCAL/The-Digital-Genizah/actions/workflows/upload_dataset.yml/badge.svg">
   </a>
-    <a href="https://github.com/NHLOCAL/The-Digital-Genizah/actions/workflows/upload_pby_dataset.yml">
-    <img src="https://github.com/NHLOCAL/The-Digital-Genizah/actions/workflows/upload_pby_dataset.yml/badge.svg" alt="PBY Build Status">
+  <a href="https://github.com/NHLOCAL/The-Digital-Genizah/actions/workflows/upload_pby_dataset.yml">
+    <img alt="Build: Project Ben-Yehuda" src="https://github.com/NHLOCAL/The-Digital-Genizah/actions/workflows/upload_pby_dataset.yml/badge.svg">
   </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/Code%20License-Apache_2.0-blue.svg" alt="License">
+
+  <!-- License -->
+  <a href="https://github.com/NHLOCAL/The-Digital-Genizah/blob/main/LICENSE">
+    <img alt="License: Apache 2.0" src="https://img.shields.io/github/license/NHLOCAL/The-Digital-Genizah?color=blue">
   </a>
+
+  <!-- Contributions Welcome -->
   <a href="https://github.com/NHLOCAL/The-Digital-Genizah/issues">
-    <img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat" alt="Contributions Welcome">
+    <img alt="Contributions Welcome" src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg">
   </a>
 </p>
 
