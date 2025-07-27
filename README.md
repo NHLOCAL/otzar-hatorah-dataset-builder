@@ -34,7 +34,7 @@
 
 ### English Version Below
 
-## 🇮🇱 גירסה עברית
+## <img src="https://flagcdn.com/w40/il.png" width="20"> גירסה עברית
 
 ### אודות הפרויקט
 
@@ -80,7 +80,7 @@
 
 ---
 
-## 🇬🇧 English Version
+## <img src="https://flagcdn.com/w40/us.png" width="20">  English Version
 
 ### About The Project
 
