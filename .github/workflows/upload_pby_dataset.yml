@@ -13,8 +13,8 @@ on:
   workflow_dispatch:
 
 env:
-  # !!! חשוב: הגדר שם ריפו חדש עבור הדאטהסט של פרויקט בן יהודה !!!
-  HF_PBY_DATASET_REPO_ID: "nhlocal/project-ben-yehuda" # החלף ב-username/dataset-name שלך
+  # הגדרת שם ריפו הדאטהסט שלך ב-Hugging Face
+  HF_PBY_DATASET_REPO_ID: "nhlocal/project-ben-yehuda"
   
   # נתיבים ספציפיים לפרויקט בן יהודה
   JSONL_SOURCE_DIR: "project-ben-yehuda/output_jsonl"
@@ -42,8 +42,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # שלב 4: המרת קובץ ה-JSONL לפורמט Parquet
-      # הסקריפט הקיים שלך `jsonl_to_parquet.py` הוא גנרי ויעבוד מצוין!
+      # שלב 4: המרת קבצי JSONL לפורמט Parquet
       - name: Convert JSONL to Parquet
         run: |
           echo "Starting conversion from '${{ env.JSONL_SOURCE_DIR }}' to '${{ env.PARQUET_OUTPUT_DIR }}'..."
