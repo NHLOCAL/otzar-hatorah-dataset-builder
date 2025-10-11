@@ -135,13 +135,55 @@ if __name__ == "__main__":
     if not years:
         print("Could not retrieve years. Exiting.")
     else:
-        print("\n--- Starting Scan and Download Process ---")
-        for year_val, year_name in sorted(years.items(), reverse=True):
-            print(f"\nProcessing Year: {year_name} (Value: {year_val})")
+        sorted_years_for_display = sorted(years.items(), key=lambda item: item[0], reverse=True)
+        
+        print("\nPlease choose year(s) to download from the list below:")
+        for i, (year_val, year_name) in enumerate(sorted_years_for_display):
+            print(f"{i + 1}: {year_name}")
+        
+        all_years_option_num = len(sorted_years_for_display) + 1
+        
+        print(f"\n- Enter a number for a single year (e.g., 5).")
+        print(f"- Enter a range for multiple years (e.g., 3-7).")
+        print(f"- Enter '{all_years_option_num}' to download all years.")
+        
+        try:
+            choice_str = input(f"\nEnter your choice: ").strip()
             
-            safe_year_name = clean_name(year_name)
+            years_to_process = []
             
-            scrape_and_download_for_year(session, year_val, year_name, safe_year_name)
-            time.sleep(2)
+            if choice_str == str(all_years_option_num):
+                # All years
+                years_to_process = sorted_years_for_display
+            elif '-' in choice_str:
+                # Range
+                start_str, end_str = choice_str.split('-', 1)
+                start_idx = int(start_str.strip()) - 1
+                end_idx = int(end_str.strip()) -1
+
+                if not (0 <= start_idx <= end_idx < len(sorted_years_for_display)):
+                    raise ValueError("Invalid range.")
+                
+                years_to_process = sorted_years_for_display[start_idx : end_idx + 1]
+            else:
+                # Single number
+                choice_idx = int(choice_str) - 1
+                if not (0 <= choice_idx < len(sorted_years_for_display)):
+                    raise ValueError("Invalid choice.")
+                years_to_process.append(sorted_years_for_display[choice_idx])
+
+            if not years_to_process:
+                print("No years selected. Exiting.")
+            else:
+                print("\n--- Starting Scan and Download Process ---")
+                print(f"Will process {len(years_to_process)} year(s).")
+                for year_val, year_name in years_to_process:
+                    print(f"\nProcessing Year: {year_name} (Value: {year_val})")
+                    safe_year_name = clean_name(year_name)
+                    scrape_and_download_for_year(session, year_val, year_name, safe_year_name)
+                    time.sleep(2)
+
+        except (ValueError, IndexError) as e:
+            print(f"Invalid input. Please enter a valid number or range (e.g., '5' or '3-7'). Details: {e}. Exiting.")
 
     print("\n\nDownload script finished.")
