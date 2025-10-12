@@ -1,2 +1,6 @@
 docling
 huggingface_hub[hf_xet]
+rich
+beautifulsoup4
+requests
+python-bidi
