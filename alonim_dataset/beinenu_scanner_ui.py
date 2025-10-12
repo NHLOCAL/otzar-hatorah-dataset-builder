@@ -182,15 +182,11 @@ def make_request(
 
 
 
-            should_retry = (
+            is_server_error = status_code is not None and status_code >= 500
+            is_throttling = status_code in {403, 418, 429}
+            is_network_error = isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
 
-                status_code in {403, 418, 429} or
-
-                status_code >= 500 or
-
-                isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
-
-            )
+            should_retry = is_server_error or is_throttling or is_network_error
 
 
 
