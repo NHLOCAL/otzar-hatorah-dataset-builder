@@ -9,7 +9,7 @@ import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pby_dataset.pipeline import PipelineConfig, build_dataset, iter_catalog_rows, make_record
+from pby_dataset.pipeline import PipelineConfig, build_dataset, iter_catalog_rows, make_record, split_parquet_file
 
 
 class BenYehudaPipelineTests(unittest.TestCase):
@@ -99,6 +99,7 @@ class BenYehudaPipelineTests(unittest.TestCase):
                 parquet_output_dir=output_dir,
                 parquet_output_file="pby_dataset.parquet",
                 jsonl_output_dir=jsonl_dir,
+                parquet_shards=1,
                 batch_size=1,
                 workers=2,
                 show_progress=False,
@@ -115,6 +116,78 @@ class BenYehudaPipelineTests(unittest.TestCase):
         self.assertEqual(len(jsonl_files), 1)
         first_jsonl_record = json.loads(jsonl_files[0].read_text(encoding="utf-8").splitlines()[0])
         self.assertEqual(first_jsonl_record["metadata"]["title"], "א")
+
+    def test_build_dataset_splits_parquet_into_requested_shards(self):
+        self.write_catalog(
+            [
+                {"ID": str(index), "path": f"/p1/m{index}", "title": f"כותרת {index}"}
+                for index in range(1, 6)
+            ]
+        )
+        for index in range(1, 6):
+            self.write_text(f"/p1/m{index}", f"טקסט {index}")
+
+        output_dir = self.root / "output_parquet"
+        result = build_dataset(
+            PipelineConfig(
+                source_dir=self.source_dir,
+                catalog_file=self.catalog_file,
+                parquet_output_dir=output_dir,
+                parquet_output_file="pby_dataset.parquet",
+                parquet_shards=3,
+                batch_size=2,
+                workers=2,
+                show_progress=False,
+            )
+        )
+
+        parquet_files = sorted(output_dir.glob("*.parquet"))
+
+        self.assertEqual([path.name for path in parquet_files], [
+            "pby_dataset-part-00001.parquet",
+            "pby_dataset-part-00002.parquet",
+            "pby_dataset-part-00003.parquet",
+        ])
+        self.assertEqual(result.parquet_paths, tuple(parquet_files))
+        self.assertEqual(sum(pq.read_table(path).num_rows for path in parquet_files), 5)
+        self.assertLessEqual(max(pq.read_table(path).num_rows for path in parquet_files), 2)
+
+    def test_split_parquet_file_rewrites_existing_file_into_shards(self):
+        self.write_catalog(
+            [
+                {"ID": str(index), "path": f"/p2/m{index}", "title": f"כותרת {index}"}
+                for index in range(1, 5)
+            ]
+        )
+        for index in range(1, 5):
+            self.write_text(f"/p2/m{index}", f"טקסט {index}")
+
+        source_output_dir = self.root / "source_parquet"
+        build_dataset(
+            PipelineConfig(
+                source_dir=self.source_dir,
+                catalog_file=self.catalog_file,
+                parquet_output_dir=source_output_dir,
+                parquet_output_file="single.parquet",
+                parquet_shards=1,
+                show_progress=False,
+            )
+        )
+
+        target_output_dir = self.root / "split_parquet"
+        split_paths = split_parquet_file(
+            input_path=source_output_dir / "single.parquet",
+            output_dir=target_output_dir,
+            output_file="pby_dataset.parquet",
+            shards=2,
+            batch_size=2,
+        )
+
+        self.assertEqual([path.name for path in split_paths], [
+            "pby_dataset-part-00001.parquet",
+            "pby_dataset-part-00002.parquet",
+        ])
+        self.assertEqual(sum(pq.read_table(path).num_rows for path in split_paths), 4)
 
 
 if __name__ == "__main__":

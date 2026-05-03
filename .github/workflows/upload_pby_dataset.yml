@@ -58,13 +58,20 @@ jobs:
               --source-dir "${{ env.PBY_SOURCE_DIR }}" \
               --catalog-file "${{ env.PBY_SOURCE_DIR }}/pseudocatalogue.csv" \
               --parquet-output-dir "${{ env.PARQUET_OUTPUT_DIR }}" \
-              --parquet-output-file "pby_dataset.parquet"
+              --parquet-output-file "pby_dataset.parquet" \
+              --parquet-shards 10
           else
             echo "Source data not found. Falling back to existing JSONL-to-Parquet conversion..."
             python gmach-otzar-hatora/jsonl_to_parquet.py \
               --input-dir "${{ env.JSONL_SOURCE_DIR }}" \
               --output-dir "${{ env.PARQUET_OUTPUT_DIR }}" \
-              --output-file "pby_dataset.parquet"
+              --output-file "pby_dataset-single.parquet"
+            python project-ben-yehuda/split_parquet.py \
+              --input-file "${{ env.PARQUET_OUTPUT_DIR }}/pby_dataset-single.parquet" \
+              --output-dir "${{ env.PARQUET_OUTPUT_DIR }}" \
+              --output-file "pby_dataset.parquet" \
+              --parquet-shards 10
+            rm "${{ env.PARQUET_OUTPUT_DIR }}/pby_dataset-single.parquet"
           fi
           echo "Parquet build complete."
 

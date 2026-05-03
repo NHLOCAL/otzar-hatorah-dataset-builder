@@ -26,6 +26,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parquet-output-dir", type=Path, default=DEFAULT_PARQUET_OUTPUT_DIR)
     parser.add_argument("--parquet-output-file", default="pby_dataset.parquet")
     parser.add_argument(
+        "--parquet-shards",
+        type=int,
+        default=10,
+        help="Target number of Parquet part files. Defaults to 10.",
+    )
+    parser.add_argument(
+        "--parquet-records-per-file",
+        type=int,
+        default=None,
+        help="Maximum records per Parquet file. Overrides --parquet-shards when provided.",
+    )
+    parser.add_argument(
+        "--parquet-target-file-size-mb",
+        type=int,
+        default=None,
+        help="Rotate to a new Parquet file after the current file reaches this approximate size.",
+    )
+    parser.add_argument(
         "--write-jsonl",
         action="store_true",
         help="Also write legacy JSONL shards to --jsonl-output-dir.",
@@ -64,6 +82,9 @@ def main() -> None:
         catalog_file=args.catalog_file,
         parquet_output_dir=args.parquet_output_dir,
         parquet_output_file=args.parquet_output_file,
+        parquet_shards=args.parquet_shards,
+        parquet_records_per_file=args.parquet_records_per_file,
+        parquet_target_file_size_mb=args.parquet_target_file_size_mb,
         jsonl_output_dir=args.jsonl_output_dir if args.write_jsonl else None,
         jsonl_records_per_file=args.jsonl_records_per_file,
         batch_size=args.batch_size,
@@ -76,14 +97,22 @@ def main() -> None:
     print("Building Project Ben-Yehuda dataset")
     print(f"Source directory: {config.source_dir}")
     print(f"Catalog file: {config.catalog_file}")
-    print(f"Parquet output: {config.parquet_output_dir / config.parquet_output_file}")
+    print(f"Parquet output directory: {config.parquet_output_dir}")
+    if config.parquet_records_per_file is not None:
+        print(f"Parquet records per file: {config.parquet_records_per_file}")
+    else:
+        print(f"Parquet target shards: {config.parquet_shards}")
+    if config.parquet_target_file_size_mb is not None:
+        print(f"Parquet target file size: {config.parquet_target_file_size_mb} MB")
     if config.jsonl_output_dir is not None:
         print(f"Legacy JSONL output: {config.jsonl_output_dir}")
 
     result = build_dataset(config)
 
     print("\n--- Processing Complete ---")
-    print(f"Parquet file: {result.parquet_path}")
+    print(f"Parquet files: {len(result.parquet_paths)}")
+    for path in result.parquet_paths:
+        print(f"  - {path}")
     print(f"Processed records: {result.processed_records}")
     print(f"Missing text files: {result.missing_text_files}")
     print(f"Skipped empty texts: {result.skipped_empty_texts}")

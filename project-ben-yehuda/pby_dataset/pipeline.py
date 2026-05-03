@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -47,6 +48,9 @@ class PipelineConfig:
     catalog_file: Path
     parquet_output_dir: Path
     parquet_output_file: str = f"{DEFAULT_OUTPUT_BASENAME}.parquet"
+    parquet_shards: int = 10
+    parquet_records_per_file: int | None = None
+    parquet_target_file_size_mb: int | None = None
     jsonl_output_dir: Path | None = None
     jsonl_records_per_file: int = 2500
     batch_size: int = 1024
@@ -63,8 +67,12 @@ class PipelineResult:
     missing_text_files: int
     skipped_empty_texts: int
     duplicate_records: int
-    parquet_path: Path
+    parquet_paths: tuple[Path, ...]
     jsonl_files: tuple[Path, ...]
+
+    @property
+    def parquet_path(self) -> Path:
+        return self.parquet_paths[0]
 
 
 @dataclass(frozen=True)
@@ -110,6 +118,83 @@ class _JsonlShardWriter:
         self._handle = path.open("w", encoding="utf-8", newline="\n")
 
 
+class _ParquetShardWriter:
+    def __init__(
+        self,
+        output_dir: Path,
+        output_file: str,
+        records_per_file: int | None,
+        target_file_size_bytes: int | None,
+        compression: str,
+    ) -> None:
+        self.output_dir = output_dir
+        self.output_file = output_file
+        self.records_per_file = records_per_file
+        self.target_file_size_bytes = target_file_size_bytes
+        self.compression = compression
+        self._writer: pq.ParquetWriter | None = None
+        self._records_in_file = 0
+        self._part_number = 0
+        self.paths: list[Path] = []
+
+    def write_records(self, records: list[dict]) -> None:
+        pending = records
+        while pending:
+            if self.records_per_file is None:
+                self._write_table(pending)
+                pending = []
+                if self._current_file_reached_target_size():
+                    self.close()
+                continue
+
+            available = self.records_per_file - self._records_in_file
+            if available <= 0:
+                self.close()
+                available = self.records_per_file
+
+            chunk = pending[:available]
+            self._write_table(chunk)
+            pending = pending[available:]
+
+            if self._records_in_file >= self.records_per_file or self._current_file_reached_target_size():
+                self.close()
+
+    def close(self) -> None:
+        if self._writer is not None:
+            self._writer.close()
+            self._writer = None
+            self._records_in_file = 0
+
+    def _write_table(self, records: list[dict]) -> None:
+        if not records:
+            return
+        if self._writer is None:
+            self._open_next_part()
+        table = pa.Table.from_pylist(records, schema=PARQUET_SCHEMA)
+        self._writer.write_table(table)
+        self._records_in_file += len(records)
+
+    def _open_next_part(self) -> None:
+        self._part_number += 1
+        path = self._next_path()
+        self.paths.append(path)
+        self._writer = pq.ParquetWriter(path, PARQUET_SCHEMA, compression=self.compression)
+
+    def _next_path(self) -> Path:
+        if self.records_per_file is None and self.target_file_size_bytes is None:
+            return self.output_dir / self.output_file
+
+        stem = Path(self.output_file).stem
+        suffix = Path(self.output_file).suffix
+        return self.output_dir / f"{stem}-part-{self._part_number:05d}{suffix}"
+
+    def _current_file_reached_target_size(self) -> bool:
+        if self.target_file_size_bytes is None or not self.paths:
+            return False
+        current_path = self.paths[-1]
+        return current_path.exists() and current_path.stat().st_size >= self.target_file_size_bytes
+
+
 def iter_catalog_rows(catalog_file: Path) -> Iterator[dict[str, str]]:
     with catalog_file.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -133,7 +218,14 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
     _validate_config(config)
     _prepare_outputs(config)
 
-    parquet_path = config.parquet_output_dir / config.parquet_output_file
+    parquet_records_per_file = _resolve_parquet_records_per_file(config)
+    parquet_writer = _ParquetShardWriter(
+        output_dir=config.parquet_output_dir,
+        output_file=config.parquet_output_file,
+        records_per_file=parquet_records_per_file,
+        target_file_size_bytes=_target_file_size_bytes(config),
+        compression=config.compression,
+    )
     jsonl_writer = (
         _JsonlShardWriter(config.jsonl_output_dir, DEFAULT_OUTPUT_BASENAME, config.jsonl_records_per_file)
         if config.jsonl_output_dir is not None
@@ -145,7 +237,6 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
     skipped_empty_texts = 0
     duplicate_records = 0
     seen_text_hashes: set[str] = set()
-    parquet_writer = pq.ParquetWriter(parquet_path, PARQUET_SCHEMA, compression=config.compression)
 
     try:
         with ThreadPoolExecutor(max_workers=config.workers) as executor:
@@ -182,8 +273,7 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
                         jsonl_writer.write(processed.record)
 
                 if records:
-                    table = pa.Table.from_pylist(records, schema=PARQUET_SCHEMA)
-                    parquet_writer.write_table(table)
+                    parquet_writer.write_records(records)
                     processed_records += len(records)
     finally:
         parquet_writer.close()
@@ -195,9 +285,61 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
         missing_text_files=missing_text_files,
         skipped_empty_texts=skipped_empty_texts,
         duplicate_records=duplicate_records,
-        parquet_path=parquet_path,
+        parquet_paths=tuple(parquet_writer.paths),
         jsonl_files=tuple(jsonl_writer.paths if jsonl_writer is not None else ()),
     )
+
+
+def split_parquet_file(
+    input_path: Path,
+    output_dir: Path,
+    output_file: str = f"{DEFAULT_OUTPUT_BASENAME}.parquet",
+    shards: int = 10,
+    records_per_file: int | None = None,
+    target_file_size_mb: int | None = None,
+    batch_size: int = 1024,
+    compression: str = "zstd",
+    clean_output: bool = True,
+) -> tuple[Path, ...]:
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input Parquet file was not found: {input_path}")
+    if not output_file.endswith(".parquet"):
+        raise ValueError("output_file must end with .parquet")
+    if shards < 1:
+        raise ValueError("shards must be at least 1")
+    if records_per_file is not None and records_per_file < 1:
+        raise ValueError("records_per_file must be at least 1")
+    if target_file_size_mb is not None and target_file_size_mb < 1:
+        raise ValueError("target_file_size_mb must be at least 1")
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if clean_output:
+        for path in _existing_parquet_paths(output_dir, output_file):
+            if path.resolve() != input_path.resolve():
+                path.unlink()
+
+    parquet_file = pq.ParquetFile(input_path)
+    resolved_records_per_file = records_per_file
+    if resolved_records_per_file is None and shards > 1 and parquet_file.metadata.num_rows > 0:
+        resolved_records_per_file = max(1, math.ceil(parquet_file.metadata.num_rows / shards))
+
+    writer = _ParquetShardWriter(
+        output_dir=output_dir,
+        output_file=output_file,
+        records_per_file=resolved_records_per_file,
+        target_file_size_bytes=target_file_size_mb * 1024 * 1024 if target_file_size_mb else None,
+        compression=compression,
+    )
+
+    try:
+        for batch in parquet_file.iter_batches(batch_size=batch_size):
+            writer.write_records(pa.Table.from_batches([batch]).to_pylist())
+    finally:
+        writer.close()
+
+    return tuple(writer.paths)
 
 
 def _validate_config(config: PipelineConfig) -> None:
@@ -211,6 +353,12 @@ def _validate_config(config: PipelineConfig) -> None:
         raise ValueError("workers must be at least 1")
     if not config.parquet_output_file.endswith(".parquet"):
         raise ValueError("parquet_output_file must end with .parquet")
+    if config.parquet_shards < 1:
+        raise ValueError("parquet_shards must be at least 1")
+    if config.parquet_records_per_file is not None and config.parquet_records_per_file < 1:
+        raise ValueError("parquet_records_per_file must be at least 1")
+    if config.parquet_target_file_size_mb is not None and config.parquet_target_file_size_mb < 1:
+        raise ValueError("parquet_target_file_size_mb must be at least 1")
 
 
 def _prepare_outputs(config: PipelineConfig) -> None:
@@ -219,9 +367,8 @@ def _prepare_outputs(config: PipelineConfig) -> None:
     if not config.clean_output:
         return
 
-    parquet_path = config.parquet_output_dir / config.parquet_output_file
-    if parquet_path.exists():
-        parquet_path.unlink()
+    for path in _existing_parquet_paths(config.parquet_output_dir, config.parquet_output_file):
+        path.unlink()
 
     if config.jsonl_output_dir is not None and config.jsonl_output_dir.exists():
         for path in config.jsonl_output_dir.glob(f"{DEFAULT_OUTPUT_BASENAME}-part-*.jsonl"):
@@ -257,3 +404,31 @@ def _batched(rows: Iterable[dict[str, str]], batch_size: int) -> Iterator[list[d
             batch = []
     if batch:
         yield batch
+
+
+def _resolve_parquet_records_per_file(config: PipelineConfig) -> int | None:
+    if config.parquet_records_per_file is not None:
+        return config.parquet_records_per_file
+    if config.parquet_shards == 1:
+        return None
+
+    catalog_rows = sum(1 for _ in iter_catalog_rows(config.catalog_file))
+    if catalog_rows == 0:
+        return None
+    return max(1, math.ceil(catalog_rows / config.parquet_shards))
+
+
+def _target_file_size_bytes(config: PipelineConfig) -> int | None:
+    if config.parquet_target_file_size_mb is None:
+        return None
+    return config.parquet_target_file_size_mb * 1024 * 1024
+
+
+def _existing_parquet_paths(output_dir: Path, output_file: str) -> Iterator[Path]:
+    exact_path = output_dir / output_file
+    if exact_path.exists():
+        yield exact_path
+
+    stem = Path(output_file).stem
+    suffix = Path(output_file).suffix
+    yield from output_dir.glob(f"{stem}-part-*{suffix}")
