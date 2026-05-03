@@ -187,5 +187,4 @@ Downloaded_Alonim/
 # Project Ben Yehuda specific ignores
 project-ben-yehuda/source_data/
 project-ben-yehuda/output_jsonl/
-project-ben-yehuda/output_parquet/
 repomix-output.md
