@@ -1,13 +1,18 @@
 name: Convert and Upload Ben-Yehuda Dataset
 
 on:
-  # הפעלה אוטומטית כאשר יש push לענף הראשי שמשנה את קובץ ה-JSONL
+  # הפעלה אוטומטית כאשר משתנה קוד העיבוד או קבצי JSONL קיימים
   push:
     branches:
       - main
       - alonim
     paths:
+      - 'project-ben-yehuda/create_dataset.py'
+      - 'project-ben-yehuda/pby_dataset/**'
+      - 'project-ben-yehuda/source_data/**'
       - 'project-ben-yehuda/output_jsonl/**'
+      - 'gmach-otzar-hatora/jsonl_to_parquet.py'
+      - 'requirements.txt'
   
   # הפעלה ידנית דרך ממשק ה-Actions ב-GitHub
   workflow_dispatch:
@@ -17,6 +22,7 @@ env:
   HF_PBY_DATASET_REPO_ID: "nhlocal/project-ben-yehuda"
   
   # נתיבים ספציפיים לפרויקט בן יהודה
+  PBY_SOURCE_DIR: "project-ben-yehuda/source_data"
   JSONL_SOURCE_DIR: "project-ben-yehuda/output_jsonl"
   PARQUET_OUTPUT_DIR: "project-ben-yehuda/output_parquet"
 
@@ -42,15 +48,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # שלב 4: המרת קבצי JSONL לפורמט Parquet
-      - name: Convert JSONL to Parquet
+      # שלב 4: בניית Parquet. אם קבצי המקור זמינים, נבנה ישירות מהם.
+      # אם לא, נשמור תאימות למסלול הישן שממיר JSONL קיים.
+      - name: Build Parquet dataset
         run: |
-          echo "Starting conversion from '${{ env.JSONL_SOURCE_DIR }}' to '${{ env.PARQUET_OUTPUT_DIR }}'..."
-          python gmach-otzar-hatora/jsonl_to_parquet.py \
-            --input-dir ${{ env.JSONL_SOURCE_DIR }} \
-            --output-dir ${{ env.PARQUET_OUTPUT_DIR }} \
-            --output-file "pby_dataset.parquet"
-          echo "Conversion complete."
+          if [ -f "${{ env.PBY_SOURCE_DIR }}/pseudocatalogue.csv" ]; then
+            echo "Source data found. Building Parquet directly from Project Ben-Yehuda source files..."
+            python project-ben-yehuda/create_dataset.py \
+              --source-dir "${{ env.PBY_SOURCE_DIR }}" \
+              --catalog-file "${{ env.PBY_SOURCE_DIR }}/pseudocatalogue.csv" \
+              --parquet-output-dir "${{ env.PARQUET_OUTPUT_DIR }}" \
+              --parquet-output-file "pby_dataset.parquet"
+          else
+            echo "Source data not found. Falling back to existing JSONL-to-Parquet conversion..."
+            python gmach-otzar-hatora/jsonl_to_parquet.py \
+              --input-dir "${{ env.JSONL_SOURCE_DIR }}" \
+              --output-dir "${{ env.PARQUET_OUTPUT_DIR }}" \
+              --output-file "pby_dataset.parquet"
+          fi
+          echo "Parquet build complete."
 
       # שלב 5: הרצת סקריפט ההעלאה עם תיקיית ה-Parquet
       - name: Run upload script

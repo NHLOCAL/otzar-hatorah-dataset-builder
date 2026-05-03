@@ -68,7 +68,7 @@
 
 תהליך העבודה במאגר הוא אוטומטי ברובו ומבוסס על השלבים הבאים:
 1.  **איסוף ועיבוד ראשוני:** סקריפטים ייעודיים (כמו `create_dataset_markdown.py` ו-`create_dataset.py`) סורקים תיקיות המכילות קבצים גולמיים (`DOCX`, `PDF`, `TXT`), מחלצים את הטקסט, ומייצרים קבצי `JSONL` סטנדרטיים ומפוצלים.
-2.  **ניקוי וסטנדרטיזציה:** הסקריפט `jsonl_to_parquet.py` קורא את קבצי ה-JSONL, מבצע פעולות ניקוי מתקדמות (כגון תיקון טקסט הפוך, הסרת כפילויות, ואנונימיזציה), וממיר את הנתונים לפורמט `Parquet` היעיל לאחסון וניתוח.
+2.  **ניקוי וסטנדרטיזציה:** הסקריפט `jsonl_to_parquet.py` קורא את קבצי ה-JSONL, מבצע פעולות ניקוי מתקדמות (כגון תיקון טקסט הפוך, הסרת כפילויות, ואנונימיזציה), וממיר את הנתונים לפורמט `Parquet` היעיל לאחסון וניתוח. בפרויקט בן-יהודה קיים גם מסלול ישיר ומהיר יותר (`project-ben-yehuda/create_dataset.py`) שבונה Parquet מובנה ישירות מקובצי המקור, ללא יצירת JSONL ביניים.
 3.  **העלאה ל-Hugging Face:** תהליכי `GitHub Actions` (`upload_dataset.yml`, `upload_pby_dataset.yml`) מופעלים אוטומטית בעת עדכון קבצי המקור, מריצים את שלבי העיבוד, ומעלים את התוצר הסופי למאגר הנתונים המתאים ב-Hugging Face.
 
 ### תרומה לפרויקט
@@ -116,7 +116,7 @@ This repository is designed to process and provide access to texts from a wide r
 
 The workflow is largely automated and based on the following steps:
 1.  **Ingestion and Initial Processing:** Dedicated scripts (like `create_dataset_markdown.py` and `create_dataset.py`) scan directories of raw files (`DOCX`, `PDF`, `TXT`), extract text, and generate standardized, sharded `JSONL` files.
-2.  **Cleaning and Standardization:** The `jsonl_to_parquet.py` script reads the JSONL files, performs advanced cleaning operations (such as fixing reversed text, deduplication, and anonymization), and converts the data into the efficient `Parquet` format.
+2.  **Cleaning and Standardization:** The `jsonl_to_parquet.py` script reads the JSONL files, performs advanced cleaning operations (such as fixing reversed text, deduplication, and anonymization), and converts the data into the efficient `Parquet` format. Project Ben-Yehuda also has a faster direct path (`project-ben-yehuda/create_dataset.py`) that builds structured Parquet directly from source files without requiring intermediate JSONL shards.
 3.  **Upload to Hugging Face:** `GitHub Actions` workflows (`upload_dataset.yml`, `upload_pby_dataset.yml`) are automatically triggered when source files are updated. They execute the processing pipeline and upload the final artifacts to the appropriate dataset repository on Hugging Face.
 
 ### Contributing
