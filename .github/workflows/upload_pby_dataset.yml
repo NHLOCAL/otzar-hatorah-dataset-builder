@@ -11,6 +11,7 @@ on:
       - 'project-ben-yehuda/pby_dataset/**'
       - 'project-ben-yehuda/source_data/**'
       - 'project-ben-yehuda/output_jsonl/**'
+      - 'project-ben-yehuda/output_parquet/**'
       - 'gmach-otzar-hatora/jsonl_to_parquet.py'
       - 'requirements.txt'
   
@@ -48,11 +49,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # שלב 4: בניית Parquet. אם קבצי המקור זמינים, נבנה ישירות מהם.
-      # אם לא, נשמור תאימות למסלול הישן שממיר JSONL קיים.
-      - name: Build Parquet dataset
+      # שלב 4: הכנת Parquet להעלאה.
+      # אם קבצי Parquet כבר קיימים בתיקיית הפלט, נעלה אותם כפי שהם.
+      # אחרת נבנה אותם מהמקור או ממסלול התאימות של JSONL.
+      - name: Prepare Parquet dataset
         run: |
-          if [ -f "${{ env.PBY_SOURCE_DIR }}/pseudocatalogue.csv" ]; then
+          if [ -d "${{ env.PARQUET_OUTPUT_DIR }}" ] && find "${{ env.PARQUET_OUTPUT_DIR }}" -maxdepth 1 -name "*.parquet" -print -quit | grep -q .; then
+            echo "Existing Parquet files found in '${{ env.PARQUET_OUTPUT_DIR }}'. Skipping rebuild."
+          elif [ -f "${{ env.PBY_SOURCE_DIR }}/pseudocatalogue.csv" ]; then
             echo "Source data found. Building Parquet directly from Project Ben-Yehuda source files..."
             python project-ben-yehuda/create_dataset.py \
               --source-dir "${{ env.PBY_SOURCE_DIR }}" \
