@@ -70,8 +70,8 @@ python alonim_dataset/scripts/jsonl_to_parquet.py
 
 ## Legacy Scripts
 
-הסקריפטים המקוריים נשמרו תחת `scripts/*_legacy.py` לצורך השוואה ותאימות
-זמנית. קוד חדש צריך להשתמש במודולים תחת `src/alonim` וב־CLI החדשים.
+הסקריפטים המקוריים נשמרו תחת `scripts/legacy/*_legacy.py` לצורך השוואה
+ותאימות זמנית. קוד חדש צריך להשתמש במודולים תחת `src/alonim` וב־CLI החדשים.
 
 ## Git Policy
 
