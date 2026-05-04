@@ -4,3 +4,6 @@ rich
 beautifulsoup4
 requests
 python-bidi
+markitdown[all]
+pandas
+pyarrow
