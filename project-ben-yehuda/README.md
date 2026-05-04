@@ -102,6 +102,55 @@ python project-ben-yehuda/create_dataset.py --write-jsonl
 python project-ben-yehuda/create_dataset.py --write-jsonl --jsonl-records-per-file 5000
 ```
 
+## גרסאות ופרסום ב-Hugging Face
+
+גרסת הדאטהסט הנוכחית:
+
+```text
+pby-2026.03
+```
+
+מדיניות מספור מומלצת:
+
+```text
+pby-YYYY.MM[.patch]
+```
+
+- `YYYY.MM` הוא חודש גרסת המקור של Project Ben-Yehuda, לא חודש ההעלאה.
+- `patch` משמש רק לתיקוני אריזה או metadata ללא שינוי מהותי בקורפוס.
+- דוגמאות:
+  - `pby-2026.03` - גרסת מקור מרץ 2026.
+  - `pby-2026.03.1` - תיקון packaging לאותה גרסת מקור.
+  - `pby-2026.06` - עדכון קורפוס חדש מיוני 2026.
+
+בכל פרסום ל-Hugging Face יש לעדכן:
+
+- Dataset card / README ב-HF:
+  - גרסה: `pby-2026.03`
+  - תאריך מקור: `2026-03`
+  - תאריך build מקומי
+  - מספר רשומות
+  - מספר קבצי Parquet
+  - schema: `text`, `source`, `metadata`
+  - הערה משפטית: התוכן כפוף לתנאי Project Ben-Yehuda, הקוד בריפו תחת הרישיון של הריפו.
+- Files and versions:
+  - למחוק קבצי Parquet ישנים שאינם חלק מהגרסה.
+  - להעלות רק את `pby_dataset-part-*.parquet` של אותה גרסה.
+- Tag או release ב-HF:
+  - ליצור tag בשם `pby-2026.03` אחרי שהקבצים וה-card עודכנו.
+- אימות לאחר העלאה:
+  - לבדוק שה-Dataset Viewer מציג את מספר הרשומות הצפוי.
+  - לבדוק שאין shards ישנים או כפולים.
+  - לבדוק שה-preview נפתח ושעמודת `metadata` תקינה.
+
+עבור גרסת `pby-2026.03`, הפלט המקומי הצפוי הוא 10 קבצי Parquet:
+
+```text
+pby_dataset-part-00001.parquet
+...
+pby_dataset-part-00010.parquet
+```
+
 ## בדיקות
 
 ```powershell
