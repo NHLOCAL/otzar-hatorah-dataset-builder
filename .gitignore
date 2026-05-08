@@ -204,3 +204,9 @@ alonim_dataset/output_parquet/*
 project-ben-yehuda/source_data/
 project-ben-yehuda/output_jsonl/
 repomix-output.md
+
+# Otzaria Library generated artifacts
+otzaria-library/source_data/*
+otzaria-library/output_parquet/*
+!otzaria-library/source_data/.gitkeep
+!otzaria-library/output_parquet/.gitkeep

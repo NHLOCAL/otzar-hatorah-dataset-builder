@@ -1,13 +1,45 @@
-import os
 import argparse
+import os
+from pathlib import Path
+
 from huggingface_hub import HfApi
 
+
+def upload_directory(
+    repo_id: str,
+    local_dir: Path,
+    path_in_repo: str = "data",
+    commit_message: str = "Update dataset from GitHub Actions",
+    delete_patterns: list[str] | None = None,
+    api: HfApi | None = None,
+    token: str | None = None,
+) -> None:
+    hf_token = token or os.environ.get("HUGGINGFACE_TOKEN")
+    if not hf_token:
+        raise ValueError(
+            "HUGGINGFACE_TOKEN environment variable is not set. "
+            "Please set it in your GitHub repository secrets."
+        )
+
+    if not local_dir.is_dir():
+        raise ValueError(f"The provided local path '{local_dir}' is not a directory.")
+
+    resolved_api = api or HfApi(token=hf_token)
+    upload_kwargs = {
+        "folder_path": str(local_dir),
+        "path_in_repo": path_in_repo,
+        "repo_id": repo_id,
+        "repo_type": "dataset",
+        "commit_message": commit_message,
+    }
+    if delete_patterns:
+        upload_kwargs["delete_patterns"] = delete_patterns
+
+    resolved_api.upload_folder(**upload_kwargs)
+
+
 def main():
-    """
-    Uploads an entire directory to a Hugging Face dataset repository.
-    This is ideal for datasets split into multiple files (shards).
-    This script is designed to be run by GitHub Actions.
-    """
+    """Uploads a local dataset directory to a Hugging Face dataset repository."""
     parser = argparse.ArgumentParser(description="Upload a dataset directory to the Hugging Face Hub.")
     parser.add_argument(
         "--repo-id", 
@@ -27,28 +59,33 @@ def main():
         default="data", 
         help="The target directory path in the repo. Defaults to 'data'."
     )
+    parser.add_argument(
+        "--commit-message",
+        type=str,
+        default="Update dataset from GitHub Actions",
+        help="Commit message to use on the Hugging Face Hub.",
+    )
+    parser.add_argument(
+        "--delete-pattern",
+        action="append",
+        default=[],
+        help=(
+            "Pattern to delete from the dataset repo before upload. "
+            "May be provided more than once, for example --delete-pattern 'data/*.parquet'."
+        ),
+    )
     
     args = parser.parse_args()
 
-    hf_token = os.environ.get("HUGGINGFACE_TOKEN")
-    if not hf_token:
-        raise ValueError("HUGGINGFACE_TOKEN environment variable is not set. Please set it in your GitHub repository secrets.")
-        
-    if not os.path.isdir(args.local_dir):
-        raise ValueError(f"The provided local path '{args.local_dir}' is not a directory.")
-
     print(f"Authenticating with Hugging Face Hub...")
-    api = HfApi(token=hf_token)
-
     print(f"Uploading directory '{args.local_dir}' to '{args.repo_id}' repository under '{args.path_in_repo}'...")
 
-    # Use upload_folder to upload all contents of the directory
-    api.upload_folder(
-        folder_path=args.local_dir,
-        path_in_repo=args.path_in_repo,
+    upload_directory(
         repo_id=args.repo_id,
-        repo_type="dataset",
-        commit_message="Update dataset from GitHub Actions"
+        local_dir=Path(args.local_dir),
+        path_in_repo=args.path_in_repo,
+        commit_message=args.commit_message,
+        delete_patterns=args.delete_pattern,
     )
 
     print("Directory uploaded successfully!")

@@ -1,0 +1,103 @@
+name: Convert and Upload Otzaria Dataset
+
+on:
+  push:
+    branches:
+      - main
+      - alonim
+    paths:
+      - 'otzaria-library/**'
+      - 'gmach-otzar-hatora/upload_directory_to_hf.py'
+      - 'requirements.txt'
+      - '.github/workflows/upload_otzaria_dataset.yml'
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+    inputs:
+      otzaria_release:
+        description: "Otzaria release tag to process, or latest"
+        required: false
+        default: "latest"
+      parquet_target_file_size_mb:
+        description: "Approximate Parquet shard size in MB"
+        required: false
+        default: "128"
+
+env:
+  HF_OTZARIA_DATASET_REPO_ID: "NHLOCAL/judaic-texts-corpus"
+  OTZARIA_SOURCE_REPO: "Otzaria/otzaria-library"
+  OTZARIA_SOURCE_DIR: "otzaria-library/source_data"
+  OTZARIA_PARQUET_OUTPUT_DIR: "otzaria-library/output_parquet"
+  OTZARIA_RELEASE_ASSET: "otzaria_latest.zip"
+
+jobs:
+  build-and-upload-otzaria:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Resolve Otzaria release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RELEASE: ${{ inputs.otzaria_release || 'latest' }}
+        run: |
+          if [ "$REQUESTED_RELEASE" = "latest" ]; then
+            TAG_NAME="$(gh release view --repo "$OTZARIA_SOURCE_REPO" --json tagName --jq .tagName)"
+          else
+            TAG_NAME="$REQUESTED_RELEASE"
+          fi
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "Using Otzaria release: $TAG_NAME"
+
+      - name: Download Otzaria release archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$OTZARIA_SOURCE_DIR"
+          gh release download "${{ steps.release.outputs.tag }}" \
+            --repo "$OTZARIA_SOURCE_REPO" \
+            --pattern "$OTZARIA_RELEASE_ASSET" \
+            --dir "$OTZARIA_SOURCE_DIR" \
+            --clobber
+
+      - name: Extract release metadata files
+        run: |
+          unzip -p "$OTZARIA_SOURCE_DIR/$OTZARIA_RELEASE_ASSET" files_manifest.json > "$OTZARIA_SOURCE_DIR/files_manifest.json"
+          unzip -p "$OTZARIA_SOURCE_DIR/$OTZARIA_RELEASE_ASSET" metadata.json > "$OTZARIA_SOURCE_DIR/metadata.json"
+
+      - name: Build Parquet dataset
+        env:
+          TARGET_FILE_SIZE_MB: ${{ inputs.parquet_target_file_size_mb || '128' }}
+        run: |
+          python otzaria-library/create_dataset.py \
+            --archive-path "$OTZARIA_SOURCE_DIR/$OTZARIA_RELEASE_ASSET" \
+            --manifest-path "$OTZARIA_SOURCE_DIR/files_manifest.json" \
+            --metadata-path "$OTZARIA_SOURCE_DIR/metadata.json" \
+            --parquet-output-dir "$OTZARIA_PARQUET_OUTPUT_DIR" \
+            --parquet-output-file "judaic_texts.parquet" \
+            --parquet-target-file-size-mb "$TARGET_FILE_SIZE_MB" \
+            --github-release "${{ steps.release.outputs.tag }}" \
+            --batch-size 512
+
+      - name: Upload Parquet files to Hugging Face
+        env:
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+        run: |
+          python gmach-otzar-hatora/upload_directory_to_hf.py \
+            --repo-id "$HF_OTZARIA_DATASET_REPO_ID" \
+            --local-dir "$OTZARIA_PARQUET_OUTPUT_DIR" \
+            --path-in-repo "data" \
+            --delete-pattern "data/*.parquet" \
+            --commit-message "Update Otzaria dataset from ${{ steps.release.outputs.tag }}"
