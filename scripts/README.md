@@ -4,9 +4,7 @@
 
 ## `upload_directory_to_hf.py`
 
-סקריפט כללי להעלאת תיקיית פלט אל Hugging Face Dataset repo. הוא אינו שייך
-למקור תוכן מסוים כמו גמ"ח אוצר התורה, Project Ben-Yehuda או Otzaria, ולכן
-הוא נשמר כאן ולא בתוך אחת מתיקיות המקורות.
+סקריפט כללי להעלאת תיקיית פלט אל Hugging Face Dataset repo.
 
 דוגמה:
 
