@@ -1,14 +1,13 @@
 import os
 import re
 import json
-import glob
 import pathlib
 import logging
 import subprocess
 import tempfile
 from tqdm import tqdm
-from datasets import load_dataset
 import multiprocessing
+import pandas as pd
 
 # --- תלויות חדשות ---
 try:
@@ -30,56 +29,147 @@ SCRIPT_DIR = pathlib.Path(__file__).parent
 ROOT_DIRECTORY = SCRIPT_DIR / "Otzar_Hatorah_Books"  # דוגמה לנתיב יחסי
 SOFFICE_PATH = r"C:\Program Files\LibreOffice\program\soffice"  # יש לוודא שנתיב זה נכון
 
-# --- שינוי: הגדרות פלט חדשות לפיצול קבצים ---
-OUTPUT_DIR = SCRIPT_DIR / "output_dataset"
+# --- הגדרות פלט לפיצול קבצי Parquet ---
+OUTPUT_DIR = SCRIPT_DIR / "output_parquet"
 OUTPUT_BASENAME = "otzar_hatorah_dataset"
 CHUNK_SIZE = 250  # מספר הרשומות בכל קובץ פלט
+MANIFEST_PATH = OUTPUT_DIR / "processed_sources.json"
 
 # --- עדכון: נוספו תבניות להתעלמות ---
 PATTERNS_TO_DELETE = ["~$", "desktop.ini", "~"] # מתעלם מקבצי וורד זמניים וקבצים שמתחילים בטילדה
 IGNORED_EXTENSIONS = [".rar", ".zip", ".xps", ".ini", "", ".tmp", ".db"]
 
+# --- Constants for Hebrew text processing ---
+FINAL_LETTERS = frozenset('םןץףך')
+NON_FINAL_EQUIVALENTS = frozenset('כמנפצ')
+REVERSED_CANARY_WORDS = frozenset([':atad', 'egami', 'ptth', 'lmth', 'gnp/egami'])
+HEBREW_REVERSED_CANARIES = frozenset(['אוה', 'רועיש', 'הזש', 'רוסא', 'יבר', 'ןכא'])
+HEBREW_CORRECT_CANARIES = frozenset(['הוא', 'שיעור', 'שזה', 'אסור', 'רבי', 'אכן'])
 
-def find_last_part_and_processed_files(output_dir: pathlib.Path, basename: str) -> (int, set):
+
+def load_progress_manifest(manifest_path: pathlib.Path) -> tuple[int, set[str]]:
     """
-    סורק את תיקיית הפלט, מוצא את מספר החלק (part) האחרון שנוצר,
-    ואוסף סט של כל קבצי המקור שכבר עובדו בכל החלקים.
+    קורא manifest קטן שמחליף את סריקת קבצי הביניים.
+    ה-manifest שומר אילו קבצי מקור כבר נכתבו בהצלחה ל-Parquet.
     """
-    processed_sources = set()
-    last_part_num = 0
-    
-    # תבנית לחיפוש קבצי פלט, למשל '.../dataset-part-00001.jsonl'
-    glob_pattern = str(output_dir / f"{basename}-part-*.jsonl")
-    
-    # תבנית רגולרית לחילוץ המספר מהשם
-    part_num_re = re.compile(rf"{re.escape(basename)}-part-(\d+)\.jsonl")
-
-    output_files = sorted(glob.glob(glob_pattern))
-
-    if not output_files:
+    if not manifest_path.exists():
         return 0, set()
 
-    print(f"Found {len(output_files)} existing output parts. Scanning for processed files...")
-    
-    for filepath in tqdm(output_files, desc="Scanning existing parts"):
-        # מציאת מספר החלק הגבוה ביותר
-        match = part_num_re.search(os.path.basename(filepath))
-        if match:
-            part_num = int(match.group(1))
-            if part_num > last_part_num:
-                last_part_num = part_num
+    with manifest_path.open('r', encoding='utf-8') as handle:
+        payload = json.load(handle)
 
-        # איסוף קבצים שכבר עובדו
-        with open(filepath, 'r', encoding='utf-8') as f:
-            for line in f:
-                try:
-                    record = json.loads(line)
-                    if 'source' in record:
-                        processed_sources.add(record['source'])
-                except json.JSONDecodeError:
-                    continue
-                    
-    return last_part_num, processed_sources
+    return int(payload.get("last_part", 0)), set(payload.get("processed_sources", []))
+
+
+def save_progress_manifest(manifest_path: pathlib.Path, last_part: int, processed_sources: set[str]) -> None:
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = manifest_path.with_suffix(".tmp")
+    payload = {
+        "last_part": last_part,
+        "processed_sources": sorted(processed_sources),
+    }
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+    tmp_path.replace(manifest_path)
+
+
+def write_parquet_part(records: list[dict], output_dir: pathlib.Path, basename: str, part_num: int) -> pathlib.Path:
+    part_filename = output_dir / f"{basename}-part-{part_num:05d}.parquet"
+    dataframe = pd.DataFrame(records)
+    dataframe.to_parquet(part_filename, index=False)
+    return part_filename
+
+
+def is_garbled_text(text: str) -> bool:
+    if len(text) < 100:
+        return False
+
+    quote_density = text.count('"') / len(text)
+    if quote_density > 0.04:
+        return True
+
+    words = [word for word in re.split(r'[^א-ת]+', text) if word]
+    if len(words) > 50:
+        average_word_length = sum(len(w) for w in words) / len(words)
+        if average_word_length < 2.7:
+            return True
+
+    return False
+
+
+def _pre_process_text(text: str) -> str:
+    return re.sub(r'(?<=[א-ת])\n(?=[א-ת])', '', text)
+
+
+def fix_hebrew_encoding(text: str) -> str:
+    try:
+        return text.encode('latin-1').decode('windows-1255')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+
+def detect_and_fix_reversed_hebrew(text: str) -> tuple[str, bool]:
+    sample = text[:10000]
+
+    for canary in HEBREW_CORRECT_CANARIES:
+        if re.search(r'\b' + re.escape(canary) + r'\b', sample):
+            return text, False
+
+    for canary in REVERSED_CANARY_WORDS:
+        if canary in sample:
+            return text[::-1], True
+
+    for canary in HEBREW_REVERSED_CANARIES:
+        if re.search(r'\b' + re.escape(canary) + r'\b', sample):
+            return text[::-1], True
+
+    words_to_sample = [word for word in re.split(r'[^א-ת]+', sample) if word]
+    if not words_to_sample:
+        return text, False
+
+    reversed_evidence_score = 0
+    for word in words_to_sample:
+        if len(word) > 1:
+            if word[0] in FINAL_LETTERS:
+                reversed_evidence_score += 1
+            if word[-1] in NON_FINAL_EQUIVALENTS:
+                reversed_evidence_score += 1
+
+    if reversed_evidence_score >= 3:
+        return text[::-1], True
+    return text, False
+
+
+def process_text_field(text: str, cid_threshold: int = 10) -> tuple[str | None, bool]:
+    was_reversed = False
+    if not isinstance(text, str):
+        return text, was_reversed
+
+    if is_garbled_text(text):
+        return None, was_reversed
+
+    if text.count('(cid:') > cid_threshold:
+        return None, was_reversed
+
+    text = re.sub(r'\(cid:\d+\)', '', text)
+    processed_text = _pre_process_text(text)
+    processed_text = fix_hebrew_encoding(processed_text)
+    processed_text, was_reversed = detect_and_fix_reversed_hebrew(processed_text)
+    return processed_text, was_reversed
+
+
+def anonymize_record(record: dict) -> dict:
+    email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b'
+    phone_regex = r'\b(?:(?:\+972-?)|0)(?:[23489]|5[0-9]|7[0-9])-?\d{7}\b'
+
+    anonymized_record = {}
+    for key, value in record.items():
+        if isinstance(value, str):
+            sanitized_value = re.sub(email_regex, "[EMAIL_REMOVED]", value)
+            sanitized_value = re.sub(phone_regex, "[PHONE_REMOVED]", sanitized_value)
+            anonymized_record[key] = sanitized_value
+        else:
+            anonymized_record[key] = value
+    return anonymized_record
 
 
 def extract_file_metadata(file_path: pathlib.Path) -> dict:
@@ -179,11 +269,15 @@ def process_single_file(file_path_str: str) -> dict or None:
         if explicit_meta:
             final_metadata.update(explicit_meta)
 
-        return {
-            "text": text.strip(),
+        processed_text, _was_reversed = process_text_field(text.strip())
+        if processed_text is None:
+            return None
+
+        return anonymize_record({
+            "text": processed_text.strip(),
             "source": rel_path_posix,
             "metadata": final_metadata
-        }
+        })
     
     except subprocess.CalledProcessError as e:
         tqdm.write(f"LibreOffice conversion error for '{file_obj.name}':\n"
@@ -209,8 +303,8 @@ def main():
     # ודא שתיקיית הפלט קיימת
     OUTPUT_DIR.mkdir(exist_ok=True)
 
-    print("--- Scanning for existing files and progress ---")
-    last_part, already_processed = find_last_part_and_processed_files(OUTPUT_DIR, OUTPUT_BASENAME)
+    print("--- Loading progress manifest ---")
+    last_part, already_processed = load_progress_manifest(MANIFEST_PATH)
     print(f"Found {len(already_processed)} previously processed source files.")
     if last_part > 0:
         print(f"Resuming after part number: {last_part}")
@@ -237,52 +331,46 @@ def main():
         print(f"\n--- Starting parallel processing with {num_workers} workers ---")
 
         current_part_num = last_part
-        count_in_current_chunk = 0
-        output_file_handle = None
+        records_in_current_chunk = []
         
         try:
             with multiprocessing.Pool(processes=num_workers) as pool:
                 with tqdm(total=len(files_to_process), desc="Processing files") as progress_bar:
                     for result in pool.imap_unordered(process_single_file, files_to_process):
                         if result:
-                            # --- לוגיקת פיצול הקבצים ---
-                            if output_file_handle is None or count_in_current_chunk >= CHUNK_SIZE:
-                                if output_file_handle:
-                                    output_file_handle.close()
-                                
+                            records_in_current_chunk.append(result)
+                            if len(records_in_current_chunk) >= CHUNK_SIZE:
                                 current_part_num += 1
-                                count_in_current_chunk = 0
-                                # הפורמט :05d מבטיח מספרים כמו 00001, 00002...
-                                part_filename = OUTPUT_DIR / f"{OUTPUT_BASENAME}-part-{current_part_num:05d}.jsonl"
-                                tqdm.write(f"Creating new output file: {part_filename}")
-                                output_file_handle = open(part_filename, 'w', encoding='utf-8')
-                            
-                            output_file_handle.write(json.dumps(result, ensure_ascii=False) + '\n')
-                            count_in_current_chunk += 1
-                            processed_count += 1
+                                part_path = write_parquet_part(records_in_current_chunk, OUTPUT_DIR, OUTPUT_BASENAME, current_part_num)
+                                tqdm.write(f"Wrote Parquet part: {part_path}")
+                                already_processed.update(record["source"] for record in records_in_current_chunk)
+                                save_progress_manifest(MANIFEST_PATH, current_part_num, already_processed)
+                                processed_count += len(records_in_current_chunk)
+                                records_in_current_chunk = []
                         else:
                             error_count += 1
                         progress_bar.update(1)
         finally:
-            if output_file_handle:
-                output_file_handle.close() # חשוב לסגור את הקובץ האחרון
+            if records_in_current_chunk:
+                current_part_num += 1
+                part_path = write_parquet_part(records_in_current_chunk, OUTPUT_DIR, OUTPUT_BASENAME, current_part_num)
+                tqdm.write(f"Wrote Parquet part: {part_path}")
+                already_processed.update(record["source"] for record in records_in_current_chunk)
+                save_progress_manifest(MANIFEST_PATH, current_part_num, already_processed)
+                processed_count += len(records_in_current_chunk)
 
         print(f"\n--- Summary: {processed_count} new files processed, {error_count} errors ---")
     
-    print(f"\n--- Verifying entire dataset from '{OUTPUT_DIR}' ---")
+    print(f"\n--- Verifying entire Parquet dataset from '{OUTPUT_DIR}' ---")
     try:
-        # --- עדכון: טעינה באמצעות תבנית גלוב, כפי ש-HF עושה ---
-        data_files_pattern = str(OUTPUT_DIR / f"{OUTPUT_BASENAME}-part-*.jsonl")
-        
-        if glob.glob(data_files_pattern):
-            ds = load_dataset('json', data_files=data_files_pattern)
-            print("Verification successful. Dataset info:")
-            print(ds)
-            
-            total_records = sum(len(split) for split in ds.values())
-            if total_records > 0:
-                print("\nExample of last record in the 'train' split:")
-                print(ds['train'][-1])
+        parquet_files = sorted(OUTPUT_DIR.glob(f"{OUTPUT_BASENAME}-part-*.parquet"))
+
+        if parquet_files:
+            total_records = 0
+            for parquet_file in parquet_files:
+                total_records += len(pd.read_parquet(parquet_file))
+            print(f"Verification successful. Parquet files: {len(parquet_files)}")
+            print(f"Total records: {total_records}")
         else:
             print("No output files found to verify.")
     except Exception as e:

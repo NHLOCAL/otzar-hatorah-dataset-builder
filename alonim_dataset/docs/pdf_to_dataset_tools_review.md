@@ -13,7 +13,7 @@
 
 - Markdown נקי
 - JSON מובנה
-- JSONL לדאטסט
+- Parquet לדאטסט
 - שמירת metadata כמו עמוד, סוג בלוק, bbox, סדר קריאה ומקור החילוץ
 
 ## Recommended Stack
@@ -218,7 +218,7 @@ Links:
 4. Detect low quality pages or blocks.
 5. Retry problematic pages with Marker or PyMuPDF4LLM.
 6. Use pdfplumber for manual coordinate-based fixes.
-7. Export final dataset as JSONL.
+7. Export final dataset as Parquet.
 
 ## Suggested Output Format
 
@@ -242,7 +242,7 @@ Links:
 ברירת המחדל:
 
 ```text
-Docling -> RTL Normalizer -> JSONL Dataset
+Docling -> RTL Normalizer -> Parquet Dataset
 ```
 
 Fallback מומלץ:

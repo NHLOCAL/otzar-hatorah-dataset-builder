@@ -16,7 +16,6 @@ alonim_dataset/
     docling_json/          # פלט JSON של Docling
     markdown/              # Markdown לאחר עיבוד Layout/RTL
     logs/                  # לוגים ודוחות ריצה
-  output_jsonl/            # JSONL shards לדאטהסט
   output_parquet/          # Parquet סופי
   docs/                    # מסמכי מחקר, פרמטרים והנחיות
   scripts/                 # נקודות כניסה להרצה
@@ -27,7 +26,7 @@ alonim_dataset/
 ## Recommended Pipeline
 
 ```text
-Download PDFs -> Docling JSON -> Markdown -> JSONL -> Parquet
+Download PDFs -> Docling JSON -> Markdown -> Parquet
 ```
 
 ## Usage
@@ -56,16 +55,10 @@ Convert Docling JSON to Markdown:
 python alonim_dataset/scripts/json_to_md.py alonim_dataset/intermediate/docling_json/example.json
 ```
 
-Build JSONL from Markdown:
+Build Parquet from Markdown:
 
 ```powershell
-python alonim_dataset/scripts/build_jsonl.py
-```
-
-Convert JSONL to Parquet:
-
-```powershell
-python alonim_dataset/scripts/jsonl_to_parquet.py
+python alonim_dataset/scripts/build_parquet.py
 ```
 
 ## Legacy Scripts
@@ -75,6 +68,6 @@ python alonim_dataset/scripts/jsonl_to_parquet.py
 
 ## Git Policy
 
-קובצי PDF, JSON/Markdown ביניים, JSONL ו־Parquet מקומיים אינם מיועדים
+קובצי PDF, JSON/Markdown ביניים ו־Parquet מקומיים אינם מיועדים
 להיכנס ל־git כברירת מחדל. אם יש צורך לפרסם snapshot מסוים, יש לעשות זאת
 בצורה מכוונת ולתעד את גרסת המקור וה־build.

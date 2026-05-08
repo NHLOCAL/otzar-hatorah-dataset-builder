@@ -1,7 +1,7 @@
 name: Convert and Upload Ben-Yehuda Dataset
 
 on:
-  # הפעלה אוטומטית כאשר משתנה קוד העיבוד או קבצי JSONL קיימים
+  # הפעלה אוטומטית כאשר משתנה קוד העיבוד, המקור או קבצי Parquet קיימים
   push:
     branches:
       - main
@@ -10,9 +10,7 @@ on:
       - 'project-ben-yehuda/create_dataset.py'
       - 'project-ben-yehuda/pby_dataset/**'
       - 'project-ben-yehuda/source_data/**'
-      - 'project-ben-yehuda/output_jsonl/**'
       - 'project-ben-yehuda/output_parquet/**'
-      - 'gmach-otzar-hatora/jsonl_to_parquet.py'
       - 'scripts/upload_directory_to_hf.py'
       - 'requirements.txt'
   
@@ -25,7 +23,6 @@ env:
   
   # נתיבים ספציפיים לפרויקט בן יהודה
   PBY_SOURCE_DIR: "project-ben-yehuda/source_data"
-  JSONL_SOURCE_DIR: "project-ben-yehuda/output_jsonl"
   PARQUET_OUTPUT_DIR: "project-ben-yehuda/output_parquet"
 
 jobs:
@@ -52,7 +49,7 @@ jobs:
 
       # שלב 4: הכנת Parquet להעלאה.
       # אם קבצי Parquet כבר קיימים בתיקיית הפלט, נעלה אותם כפי שהם.
-      # אחרת נבנה אותם מהמקור או ממסלול התאימות של JSONL.
+      # אחרת נבנה אותם מהמקור.
       - name: Prepare Parquet dataset
         run: |
           if [ -d "${{ env.PARQUET_OUTPUT_DIR }}" ] && find "${{ env.PARQUET_OUTPUT_DIR }}" -maxdepth 1 -name "*.parquet" -print -quit | grep -q .; then
@@ -66,17 +63,8 @@ jobs:
               --parquet-output-file "pby_dataset.parquet" \
               --parquet-shards 10
           else
-            echo "Source data not found. Falling back to existing JSONL-to-Parquet conversion..."
-            python gmach-otzar-hatora/jsonl_to_parquet.py \
-              --input-dir "${{ env.JSONL_SOURCE_DIR }}" \
-              --output-dir "${{ env.PARQUET_OUTPUT_DIR }}" \
-              --output-file "pby_dataset-single.parquet"
-            python project-ben-yehuda/split_parquet.py \
-              --input-file "${{ env.PARQUET_OUTPUT_DIR }}/pby_dataset-single.parquet" \
-              --output-dir "${{ env.PARQUET_OUTPUT_DIR }}" \
-              --output-file "pby_dataset.parquet" \
-              --parquet-shards 10
-            rm "${{ env.PARQUET_OUTPUT_DIR }}/pby_dataset-single.parquet"
+            echo "No existing Parquet files or source catalog found. Cannot build dataset."
+            exit 1
           fi
           echo "Parquet build complete."
 

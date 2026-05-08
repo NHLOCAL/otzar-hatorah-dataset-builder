@@ -16,7 +16,6 @@ project-ben-yehuda/
     test_pipeline.py         # בדיקות יחידה
   source_data/               # קלט מקומי, לא מנוהל ב-git
   output_parquet/            # פלט Parquet, לא מנוהל ב-git
-  output_jsonl/              # פלט JSONL אופציונלי לתאימות לאחור
 ```
 
 ## קלט צפוי
@@ -88,20 +87,6 @@ python project-ben-yehuda/split_parquet.py `
   --parquet-shards 10
 ```
 
-## JSONL לתאימות לאחור
-
-המסלול המהיר אינו דורש JSONL. אם בכל זאת צריך להפיק shards ישנים:
-
-```powershell
-python project-ben-yehuda/create_dataset.py --write-jsonl
-```
-
-אפשר לשנות את גודל ה-shards:
-
-```powershell
-python project-ben-yehuda/create_dataset.py --write-jsonl --jsonl-records-per-file 5000
-```
-
 ## גרסאות ופרסום ב-Hugging Face
 
 גרסת הדאטהסט הנוכחית:
@@ -159,7 +144,6 @@ python -m unittest discover -s project-ben-yehuda/tests
 
 ## הערות CI
 
-`source_data` אינו מנוהל ב-git. ה-workflow של GitHub Actions מנסה לבנות
-Parquet ישירות מקובצי המקור אם הם זמינים בסביבת הריצה. אם הם אינם זמינים,
-הוא נופל למסלול התאימות הישן שממיר את קובצי `output_jsonl` הקיימים ואז מפצל
-את ה-Parquet שנוצר ל-10 חלקים לפני ההעלאה.
+`source_data` אינו מנוהל ב-git. ה-workflow של GitHub Actions משתמש בקבצי
+Parquet קיימים אם הם זמינים בתיקיית הפלט, או בונה אותם ישירות מקובצי המקור
+כאשר `source_data/pseudocatalogue.csv` זמין בסביבת הריצה.

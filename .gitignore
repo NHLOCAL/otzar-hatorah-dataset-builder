@@ -190,19 +190,16 @@ alonim_dataset/source_data/samples/*
 alonim_dataset/intermediate/docling_json/*
 alonim_dataset/intermediate/markdown/*
 alonim_dataset/intermediate/logs/*
-alonim_dataset/output_jsonl/*
 alonim_dataset/output_parquet/*
 !alonim_dataset/source_data/pdf/.gitkeep
 !alonim_dataset/source_data/samples/.gitkeep
 !alonim_dataset/intermediate/docling_json/.gitkeep
 !alonim_dataset/intermediate/markdown/.gitkeep
 !alonim_dataset/intermediate/logs/.gitkeep
-!alonim_dataset/output_jsonl/.gitkeep
 !alonim_dataset/output_parquet/.gitkeep
 
 # Project Ben Yehuda specific ignores
 project-ben-yehuda/source_data/
-project-ben-yehuda/output_jsonl/
 repomix-output.md
 
 # Otzaria Library generated artifacts
