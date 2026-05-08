@@ -94,6 +94,19 @@ otzaria-library/output_parquet/judaic_texts-part-00002.parquet
 4. מעלה אותם אל `NHLOCAL/judaic-texts-corpus` תחת `data/`.
 5. מוחק לפני ההעלאה קובצי `data/*.parquet` ישנים כדי למנוע shards יתומים.
 
+ההעלאה מתבצעת דרך הסקריפט המשותף `scripts/upload_directory_to_hf.py`. הסקריפט
+אינו נמצא בתיקייה זו משום שהוא כלי תשתיתי כללי המשמש כמה מקורות דאטה. מחיקת
+הקבצים הישנים מבוצעת לפני ההעלאה באמצעות `HfApi.delete_files`, עם pattern
+יחסי לשורש ה-Hugging Face repo:
+
+```text
+data/*.parquet
+```
+
+אין להשתמש כאן ב-pattern יחסי ל-`path_in_repo`, מפני שהעלאה לתוך `data/`
+כבר מגדירה את יעד ההעלאה בלבד. הפרדה זו מונעת מצב שבו pattern כמו
+`data/*.parquet` מפורש בטעות כ-`data/data/*.parquet`.
+
 ניתן להריץ ידנית דרך GitHub Actions ולבחור:
 
 - `otzaria_release`: תג Release, למשל `library-140`, או `latest`.

@@ -25,39 +25,43 @@ def upload_directory(
         raise ValueError(f"The provided local path '{local_dir}' is not a directory.")
 
     resolved_api = api or HfApi(token=hf_token)
-    upload_kwargs = {
-        "folder_path": str(local_dir),
-        "path_in_repo": path_in_repo,
-        "repo_id": repo_id,
-        "repo_type": "dataset",
-        "commit_message": commit_message,
-    }
     if delete_patterns:
-        upload_kwargs["delete_patterns"] = delete_patterns
+        resolved_api.delete_files(
+            repo_id=repo_id,
+            delete_patterns=delete_patterns,
+            repo_type="dataset",
+            commit_message=f"Delete old files before upload: {commit_message}",
+        )
 
-    resolved_api.upload_folder(**upload_kwargs)
+    resolved_api.upload_folder(
+        folder_path=str(local_dir),
+        path_in_repo=path_in_repo,
+        repo_id=repo_id,
+        repo_type="dataset",
+        commit_message=commit_message,
+    )
 
 
 def main():
     """Uploads a local dataset directory to a Hugging Face dataset repository."""
     parser = argparse.ArgumentParser(description="Upload a dataset directory to the Hugging Face Hub.")
     parser.add_argument(
-        "--repo-id", 
-        type=str, 
-        required=True, 
-        help="The ID of the repository on the Hub (e.g., 'username/my-dataset')."
+        "--repo-id",
+        type=str,
+        required=True,
+        help="The ID of the repository on the Hub (e.g., 'username/my-dataset').",
     )
     parser.add_argument(
-        "--local-dir", 
-        type=str, 
-        required=True, 
-        help="The local path to the directory to upload."
+        "--local-dir",
+        type=str,
+        required=True,
+        help="The local path to the directory to upload.",
     )
     parser.add_argument(
-        "--path-in-repo", 
-        type=str, 
-        default="data", 
-        help="The target directory path in the repo. Defaults to 'data'."
+        "--path-in-repo",
+        type=str,
+        default="data",
+        help="The target directory path in the repo. Defaults to 'data'.",
     )
     parser.add_argument(
         "--commit-message",
@@ -70,14 +74,16 @@ def main():
         action="append",
         default=[],
         help=(
-            "Pattern to delete from the dataset repo before upload. "
+            "Repository-root-relative pattern to delete before upload. "
             "May be provided more than once, for example --delete-pattern 'data/*.parquet'."
         ),
     )
-    
+
     args = parser.parse_args()
 
-    print(f"Authenticating with Hugging Face Hub...")
+    print("Authenticating with Hugging Face Hub...")
+    if args.delete_pattern:
+        print(f"Deleting existing remote files matching: {args.delete_pattern}")
     print(f"Uploading directory '{args.local_dir}' to '{args.repo_id}' repository under '{args.path_in_repo}'...")
 
     upload_directory(

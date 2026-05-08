@@ -13,6 +13,7 @@ on:
       - 'project-ben-yehuda/output_jsonl/**'
       - 'project-ben-yehuda/output_parquet/**'
       - 'gmach-otzar-hatora/jsonl_to_parquet.py'
+      - 'scripts/upload_directory_to_hf.py'
       - 'requirements.txt'
   
   # הפעלה ידנית דרך ממשק ה-Actions ב-GitHub
@@ -86,6 +87,8 @@ jobs:
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
           echo "Uploading directory '${{ env.PARQUET_OUTPUT_DIR }}' to Hugging Face..."
-          python gmach-otzar-hatora/upload_directory_to_hf.py \
+          python scripts/upload_directory_to_hf.py \
             --repo-id ${{ env.HF_PBY_DATASET_REPO_ID }} \
-            --local-dir ${{ env.PARQUET_OUTPUT_DIR }}
+            --local-dir ${{ env.PARQUET_OUTPUT_DIR }} \
+            --delete-pattern "data/*.parquet" \
+            --commit-message "Update Project Ben-Yehuda dataset"

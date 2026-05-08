@@ -7,7 +7,7 @@ on:
       - alonim
     paths:
       - 'otzaria-library/**'
-      - 'gmach-otzar-hatora/upload_directory_to_hf.py'
+      - 'scripts/upload_directory_to_hf.py'
       - 'requirements.txt'
       - '.github/workflows/upload_otzaria_dataset.yml'
   schedule:
@@ -95,7 +95,7 @@ jobs:
         env:
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
-          python gmach-otzar-hatora/upload_directory_to_hf.py \
+          python scripts/upload_directory_to_hf.py \
             --repo-id "$HF_OTZARIA_DATASET_REPO_ID" \
             --local-dir "$OTZARIA_PARQUET_OUTPUT_DIR" \
             --path-in-repo "data" \

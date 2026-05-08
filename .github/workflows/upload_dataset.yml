@@ -1,4 +1,4 @@
-name: Convert and Upload Dataset to Hugging Face
+name: Convert and Upload Otzar HaTorah Dataset
 
 on:
   # הפעלה אוטומטית כאשר יש push לענף הראשי שמשנה קבצים בתיקיית המשנה
@@ -8,7 +8,7 @@ on:
       - alonim
     paths:
       - 'gmach-otzar-hatora/output_dataset/**'
-      - 'gmach-otzar-hatora/upload_directory_to_hf.py'
+      - 'scripts/upload_directory_to_hf.py'
       - 'gmach-otzar-hatora/jsonl_to_parquet.py'
   
   # הפעלה ידנית דרך ממשק ה-Actions ב-GitHub
@@ -63,6 +63,8 @@ jobs:
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
           echo "Uploading directory '${{ env.PARQUET_OUTPUT_DIR }}' to Hugging Face..."
-          python gmach-otzar-hatora/upload_directory_to_hf.py \
+          python scripts/upload_directory_to_hf.py \
             --repo-id ${{ env.HF_DATASET_REPO_ID }} \
-            --local-dir ${{ env.PARQUET_OUTPUT_DIR }}
+            --local-dir ${{ env.PARQUET_OUTPUT_DIR }} \
+            --delete-pattern "data/*.parquet" \
+            --commit-message "Update Otzar HaTorah dataset"
