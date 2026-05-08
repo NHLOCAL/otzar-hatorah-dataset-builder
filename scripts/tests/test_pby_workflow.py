@@ -18,6 +18,8 @@ class PbyWorkflowTests(unittest.TestCase):
         self.assertIn('--pattern "$PBY_TEXT_ARCHIVE"', workflow)
         self.assertIn('--pattern "$PBY_CATALOG_ASSET"', workflow)
         self.assertIn('unzip -q "$PBY_SOURCE_DIR/$PBY_TEXT_ARCHIVE" -d "$PBY_SOURCE_DIR"', workflow)
+        self.assertIn('PBY_TEXT_SOURCE_DIR="$PBY_SOURCE_DIR/txt"', workflow)
+        self.assertIn('--source-dir "$PBY_TEXT_SOURCE_DIR"', workflow)
         self.assertIn("${{ (inputs.use_local_source || 'false') != 'true' }}", workflow)
 
 

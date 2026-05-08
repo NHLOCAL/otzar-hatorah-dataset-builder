@@ -98,9 +98,13 @@ jobs:
             echo "No existing Parquet files or source catalog found. Cannot build dataset."
             exit 1
           fi
+          PBY_TEXT_SOURCE_DIR="$PBY_SOURCE_DIR"
+          if [ -d "$PBY_SOURCE_DIR/txt" ]; then
+            PBY_TEXT_SOURCE_DIR="$PBY_SOURCE_DIR/txt"
+          fi
           echo "Building Parquet directly from Project Ben-Yehuda source files..."
           python project-ben-yehuda/create_dataset.py \
-            --source-dir "$PBY_SOURCE_DIR" \
+            --source-dir "$PBY_TEXT_SOURCE_DIR" \
             --catalog-file "$PBY_SOURCE_DIR/$PBY_CATALOG_ASSET" \
             --parquet-output-dir "$PARQUET_OUTPUT_DIR" \
             --parquet-output-file "pby_dataset.parquet" \
