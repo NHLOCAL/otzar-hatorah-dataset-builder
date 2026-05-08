@@ -13,17 +13,30 @@ on:
       - 'project-ben-yehuda/output_parquet/**'
       - 'scripts/upload_directory_to_hf.py'
       - 'requirements.txt'
+      - '.github/workflows/upload_pby_dataset.yml'
   
   # הפעלה ידנית דרך ממשק ה-Actions ב-GitHub
   workflow_dispatch:
+    inputs:
+      pby_release:
+        description: "Project Ben-Yehuda release tag to process, or latest"
+        required: false
+        default: "latest"
+      use_local_source:
+        description: "Use checked-in project-ben-yehuda/source_data instead of downloading release assets"
+        required: false
+        default: "false"
 
 env:
   # הגדרת שם ריפו הדאטהסט שלך ב-Hugging Face
   HF_PBY_DATASET_REPO_ID: "nhlocal/project-ben-yehuda"
   
   # נתיבים ספציפיים לפרויקט בן יהודה
+  PBY_SOURCE_REPO: "projectbenyehuda/public_domain_dump"
   PBY_SOURCE_DIR: "project-ben-yehuda/source_data"
   PARQUET_OUTPUT_DIR: "project-ben-yehuda/output_parquet"
+  PBY_TEXT_ARCHIVE: "txt.zip"
+  PBY_CATALOG_ASSET: "pseudocatalogue.csv"
 
 jobs:
   build-and-upload-pby:
@@ -47,25 +60,51 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # שלב 4: הכנת Parquet להעלאה.
-      # אם קבצי Parquet כבר קיימים בתיקיית הפלט, נעלה אותם כפי שהם.
-      # אחרת נבנה אותם מהמקור.
-      - name: Prepare Parquet dataset
+      - name: Resolve Project Ben-Yehuda release
+        id: release
+        if: ${{ (inputs.use_local_source || 'false') != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RELEASE: ${{ inputs.pby_release || 'latest' }}
         run: |
-          if [ -d "${{ env.PARQUET_OUTPUT_DIR }}" ] && find "${{ env.PARQUET_OUTPUT_DIR }}" -maxdepth 1 -name "*.parquet" -print -quit | grep -q .; then
-            echo "Existing Parquet files found in '${{ env.PARQUET_OUTPUT_DIR }}'. Skipping rebuild."
-          elif [ -f "${{ env.PBY_SOURCE_DIR }}/pseudocatalogue.csv" ]; then
-            echo "Source data found. Building Parquet directly from Project Ben-Yehuda source files..."
-            python project-ben-yehuda/create_dataset.py \
-              --source-dir "${{ env.PBY_SOURCE_DIR }}" \
-              --catalog-file "${{ env.PBY_SOURCE_DIR }}/pseudocatalogue.csv" \
-              --parquet-output-dir "${{ env.PARQUET_OUTPUT_DIR }}" \
-              --parquet-output-file "pby_dataset.parquet" \
-              --parquet-shards 10
+          if [ "$REQUESTED_RELEASE" = "latest" ]; then
+            TAG_NAME="$(gh release view --repo "$PBY_SOURCE_REPO" --json tagName --jq .tagName)"
           else
+            TAG_NAME="$REQUESTED_RELEASE"
+          fi
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "Using Project Ben-Yehuda release: $TAG_NAME"
+
+      - name: Download Project Ben-Yehuda release assets
+        if: ${{ (inputs.use_local_source || 'false') != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf "$PBY_SOURCE_DIR"
+          mkdir -p "$PBY_SOURCE_DIR"
+          gh release download "${{ steps.release.outputs.tag }}" \
+            --repo "$PBY_SOURCE_REPO" \
+            --pattern "$PBY_TEXT_ARCHIVE" \
+            --pattern "$PBY_CATALOG_ASSET" \
+            --dir "$PBY_SOURCE_DIR" \
+            --clobber
+          unzip -q "$PBY_SOURCE_DIR/$PBY_TEXT_ARCHIVE" -d "$PBY_SOURCE_DIR"
+
+      # שלב 4: הכנת Parquet להעלאה.
+      # ברירת המחדל בונה מה-assets של GitHub Release; בהרצה ידנית ניתן לבחור מקור מקומי.
+      - name: Build Parquet dataset
+        run: |
+          if [ ! -f "$PBY_SOURCE_DIR/$PBY_CATALOG_ASSET" ]; then
             echo "No existing Parquet files or source catalog found. Cannot build dataset."
             exit 1
           fi
+          echo "Building Parquet directly from Project Ben-Yehuda source files..."
+          python project-ben-yehuda/create_dataset.py \
+            --source-dir "$PBY_SOURCE_DIR" \
+            --catalog-file "$PBY_SOURCE_DIR/$PBY_CATALOG_ASSET" \
+            --parquet-output-dir "$PARQUET_OUTPUT_DIR" \
+            --parquet-output-file "pby_dataset.parquet" \
+            --parquet-shards 10
           echo "Parquet build complete."
 
       # שלב 5: הרצת סקריפט ההעלאה עם תיקיית ה-Parquet
