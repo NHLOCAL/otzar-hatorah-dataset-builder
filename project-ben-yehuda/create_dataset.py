@@ -11,14 +11,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_SOURCE_DIR = SCRIPT_DIR / "source_data"
 DEFAULT_CATALOG_FILE = DEFAULT_SOURCE_DIR / "pseudocatalogue.csv"
 DEFAULT_PARQUET_OUTPUT_DIR = SCRIPT_DIR / "output_parquet"
-DEFAULT_JSONL_OUTPUT_DIR = SCRIPT_DIR / "output_jsonl"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Build the Project Ben-Yehuda dataset directly from the source catalog "
-            "and text files into Parquet. JSONL shards are optional for compatibility."
+            "and text files into Parquet."
         )
     )
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIR)
@@ -43,13 +42,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Rotate to a new Parquet file after the current file reaches this approximate size.",
     )
-    parser.add_argument(
-        "--write-jsonl",
-        action="store_true",
-        help="Also write legacy JSONL shards to --jsonl-output-dir.",
-    )
-    parser.add_argument("--jsonl-output-dir", type=Path, default=DEFAULT_JSONL_OUTPUT_DIR)
-    parser.add_argument("--jsonl-records-per-file", type=int, default=2500)
     parser.add_argument("--batch-size", type=int, default=1024)
     parser.add_argument(
         "--workers",
@@ -70,7 +62,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--keep-existing-output",
         action="store_true",
-        help="Do not delete the target Parquet file or old generated JSONL shards before writing.",
+        help="Do not delete the target Parquet file before writing.",
     )
     return parser.parse_args()
 
@@ -85,8 +77,6 @@ def main() -> None:
         parquet_shards=args.parquet_shards,
         parquet_records_per_file=args.parquet_records_per_file,
         parquet_target_file_size_mb=args.parquet_target_file_size_mb,
-        jsonl_output_dir=args.jsonl_output_dir if args.write_jsonl else None,
-        jsonl_records_per_file=args.jsonl_records_per_file,
         batch_size=args.batch_size,
         workers=args.workers,
         deduplicate_text=not args.no_deduplicate,
@@ -104,8 +94,6 @@ def main() -> None:
         print(f"Parquet target shards: {config.parquet_shards}")
     if config.parquet_target_file_size_mb is not None:
         print(f"Parquet target file size: {config.parquet_target_file_size_mb} MB")
-    if config.jsonl_output_dir is not None:
-        print(f"Legacy JSONL output: {config.jsonl_output_dir}")
 
     result = build_dataset(config)
 
@@ -117,8 +105,6 @@ def main() -> None:
     print(f"Missing text files: {result.missing_text_files}")
     print(f"Skipped empty texts: {result.skipped_empty_texts}")
     print(f"Duplicate records removed: {result.duplicate_records}")
-    if result.jsonl_files:
-        print(f"JSONL shard files: {len(result.jsonl_files)}")
 
 
 if __name__ == "__main__":

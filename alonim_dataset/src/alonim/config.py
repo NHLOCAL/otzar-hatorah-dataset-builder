@@ -13,10 +13,8 @@ DEFAULT_SAMPLES_DIR = PROJECT_DIR / "source_data" / "samples"
 DEFAULT_DOCLING_JSON_DIR = PROJECT_DIR / "intermediate" / "docling_json"
 DEFAULT_MARKDOWN_DIR = PROJECT_DIR / "intermediate" / "markdown"
 DEFAULT_LOG_DIR = PROJECT_DIR / "intermediate" / "logs"
-DEFAULT_OUTPUT_JSONL_DIR = PROJECT_DIR / "output_jsonl"
 DEFAULT_OUTPUT_PARQUET_DIR = PROJECT_DIR / "output_parquet"
 
-DEFAULT_JSONL_BASENAME = "alonim_dataset"
 DEFAULT_PARQUET_FILE = "alonim_dataset.parquet"
 
 DEFAULT_HEADERS = {

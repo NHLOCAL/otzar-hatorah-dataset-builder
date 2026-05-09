@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import json
 import math
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -51,8 +50,6 @@ class PipelineConfig:
     parquet_shards: int = 10
     parquet_records_per_file: int | None = None
     parquet_target_file_size_mb: int | None = None
-    jsonl_output_dir: Path | None = None
-    jsonl_records_per_file: int = 2500
     batch_size: int = 1024
     workers: int = 8
     deduplicate_text: bool = True
@@ -68,7 +65,6 @@ class PipelineResult:
     skipped_empty_texts: int
     duplicate_records: int
     parquet_paths: tuple[Path, ...]
-    jsonl_files: tuple[Path, ...]
 
     @property
     def parquet_path(self) -> Path:
@@ -80,42 +76,6 @@ class _ProcessedRow:
     record: dict | None
     missing_text_file: bool = False
     empty_text: bool = False
-
-
-class _JsonlShardWriter:
-    def __init__(self, output_dir: Path, basename: str, records_per_file: int) -> None:
-        if records_per_file < 1:
-            raise ValueError("jsonl_records_per_file must be at least 1")
-
-        self.output_dir = output_dir
-        self.basename = basename
-        self.records_per_file = records_per_file
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._handle = None
-        self._part_number = 0
-        self._records_in_part = 0
-        self.paths: list[Path] = []
-
-    def write(self, record: dict) -> None:
-        if self._handle is None or self._records_in_part >= self.records_per_file:
-            self._open_next_part()
-
-        self._handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
-        self._handle.write("\n")
-        self._records_in_part += 1
-
-    def close(self) -> None:
-        if self._handle is not None:
-            self._handle.close()
-            self._handle = None
-
-    def _open_next_part(self) -> None:
-        self.close()
-        self._part_number += 1
-        self._records_in_part = 0
-        path = self.output_dir / f"{self.basename}-part-{self._part_number:05d}.jsonl"
-        self.paths.append(path)
-        self._handle = path.open("w", encoding="utf-8", newline="\n")
 
 
 class _ParquetShardWriter:
@@ -226,12 +186,6 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
         target_file_size_bytes=_target_file_size_bytes(config),
         compression=config.compression,
     )
-    jsonl_writer = (
-        _JsonlShardWriter(config.jsonl_output_dir, DEFAULT_OUTPUT_BASENAME, config.jsonl_records_per_file)
-        if config.jsonl_output_dir is not None
-        else None
-    )
-
     processed_records = 0
     missing_text_files = 0
     skipped_empty_texts = 0
@@ -269,16 +223,12 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
                         seen_text_hashes.add(text_hash)
 
                     records.append(processed.record)
-                    if jsonl_writer is not None:
-                        jsonl_writer.write(processed.record)
 
                 if records:
                     parquet_writer.write_records(records)
                     processed_records += len(records)
     finally:
         parquet_writer.close()
-        if jsonl_writer is not None:
-            jsonl_writer.close()
 
     return PipelineResult(
         processed_records=processed_records,
@@ -286,7 +236,6 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
         skipped_empty_texts=skipped_empty_texts,
         duplicate_records=duplicate_records,
         parquet_paths=tuple(parquet_writer.paths),
-        jsonl_files=tuple(jsonl_writer.paths if jsonl_writer is not None else ()),
     )
 
 
@@ -369,10 +318,6 @@ def _prepare_outputs(config: PipelineConfig) -> None:
 
     for path in _existing_parquet_paths(config.parquet_output_dir, config.parquet_output_file):
         path.unlink()
-
-    if config.jsonl_output_dir is not None and config.jsonl_output_dir.exists():
-        for path in config.jsonl_output_dir.glob(f"{DEFAULT_OUTPUT_BASENAME}-part-*.jsonl"):
-            path.unlink()
 
 
 def _read_text_record(source_dir: Path, metadata: dict[str, str]) -> _ProcessedRow:

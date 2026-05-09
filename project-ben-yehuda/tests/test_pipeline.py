@@ -1,5 +1,4 @@
 import csv
-import json
 import sys
 import tempfile
 import unittest
@@ -79,7 +78,7 @@ class BenYehudaPipelineTests(unittest.TestCase):
 
         self.assertEqual([row["ID"] for row in rows], ["1"])
 
-    def test_build_dataset_writes_parquet_and_optional_jsonl(self):
+    def test_build_dataset_writes_parquet_without_jsonl_output(self):
         self.write_catalog(
             [
                 {"ID": "1", "path": "/p1/m1", "title": "א", "authors": "מחבר"},
@@ -91,14 +90,12 @@ class BenYehudaPipelineTests(unittest.TestCase):
         self.write_text("/p1/m2", "טקסט שני")
 
         output_dir = self.root / "output_parquet"
-        jsonl_dir = self.root / "output_jsonl"
         result = build_dataset(
             PipelineConfig(
                 source_dir=self.source_dir,
                 catalog_file=self.catalog_file,
                 parquet_output_dir=output_dir,
                 parquet_output_file="pby_dataset.parquet",
-                jsonl_output_dir=jsonl_dir,
                 parquet_shards=1,
                 batch_size=1,
                 workers=2,
@@ -111,11 +108,8 @@ class BenYehudaPipelineTests(unittest.TestCase):
         table = pq.read_table(output_dir / "pby_dataset.parquet")
         self.assertEqual(table.num_rows, 2)
         self.assertEqual(table.column_names, ["text", "source", "metadata"])
-
-        jsonl_files = sorted(jsonl_dir.glob("*.jsonl"))
-        self.assertEqual(len(jsonl_files), 1)
-        first_jsonl_record = json.loads(jsonl_files[0].read_text(encoding="utf-8").splitlines()[0])
-        self.assertEqual(first_jsonl_record["metadata"]["title"], "א")
+        self.assertFalse(any(self.root.rglob("*.jsonl")))
+        self.assertFalse(hasattr(result, "jsonl_files"))
 
     def test_build_dataset_splits_parquet_into_requested_shards(self):
         self.write_catalog(

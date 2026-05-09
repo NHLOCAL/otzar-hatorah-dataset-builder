@@ -1,7 +1,7 @@
 name: Convert and Upload Ben-Yehuda Dataset
 
 on:
-  # הפעלה אוטומטית כאשר משתנה קוד העיבוד או קבצי JSONL קיימים
+  # הפעלה אוטומטית כאשר משתנה קוד העיבוד, המקור או קבצי Parquet קיימים
   push:
     branches:
       - main
@@ -10,23 +10,47 @@ on:
       - 'project-ben-yehuda/create_dataset.py'
       - 'project-ben-yehuda/pby_dataset/**'
       - 'project-ben-yehuda/source_data/**'
-      - 'project-ben-yehuda/output_jsonl/**'
       - 'project-ben-yehuda/output_parquet/**'
-      - 'gmach-otzar-hatora/jsonl_to_parquet.py'
       - 'scripts/upload_directory_to_hf.py'
       - 'requirements.txt'
+      - '.github/workflows/upload_pby_dataset.yml'
+  schedule:
+    - cron: '47 2 * * 2,5'
   
   # הפעלה ידנית דרך ממשק ה-Actions ב-GitHub
   workflow_dispatch:
+    inputs:
+      pby_release:
+        description: "Project Ben-Yehuda release tag to process, or latest"
+        required: false
+        default: "latest"
+      use_local_source:
+        description: "Use checked-in project-ben-yehuda/source_data instead of downloading release assets"
+        required: false
+        default: "false"
+      force_rebuild:
+        description: "Rebuild even if the latest release was already uploaded"
+        required: false
+        default: "false"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: upload-pby-dataset
+  cancel-in-progress: false
 
 env:
   # הגדרת שם ריפו הדאטהסט שלך ב-Hugging Face
   HF_PBY_DATASET_REPO_ID: "nhlocal/project-ben-yehuda"
   
   # נתיבים ספציפיים לפרויקט בן יהודה
+  PBY_SOURCE_REPO: "projectbenyehuda/public_domain_dump"
   PBY_SOURCE_DIR: "project-ben-yehuda/source_data"
-  JSONL_SOURCE_DIR: "project-ben-yehuda/output_jsonl"
   PARQUET_OUTPUT_DIR: "project-ben-yehuda/output_parquet"
+  PBY_TEXT_ARCHIVE: "txt.zip"
+  PBY_CATALOG_ASSET: "pseudocatalogue.csv"
 
 jobs:
   build-and-upload-pby:
@@ -50,38 +74,89 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # שלב 4: הכנת Parquet להעלאה.
-      # אם קבצי Parquet כבר קיימים בתיקיית הפלט, נעלה אותם כפי שהם.
-      # אחרת נבנה אותם מהמקור או ממסלול התאימות של JSONL.
-      - name: Prepare Parquet dataset
+      - name: Resolve Project Ben-Yehuda release and check upload state
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RELEASE: ${{ inputs.pby_release || 'latest' }}
+          USE_LOCAL_SOURCE: ${{ inputs.use_local_source || 'false' }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild || 'false' }}
+          LAST_PROCESSED_RELEASE: ${{ vars.LAST_PBY_RELEASE }}
         run: |
-          if [ -d "${{ env.PARQUET_OUTPUT_DIR }}" ] && find "${{ env.PARQUET_OUTPUT_DIR }}" -maxdepth 1 -name "*.parquet" -print -quit | grep -q .; then
-            echo "Existing Parquet files found in '${{ env.PARQUET_OUTPUT_DIR }}'. Skipping rebuild."
-          elif [ -f "${{ env.PBY_SOURCE_DIR }}/pseudocatalogue.csv" ]; then
-            echo "Source data found. Building Parquet directly from Project Ben-Yehuda source files..."
-            python project-ben-yehuda/create_dataset.py \
-              --source-dir "${{ env.PBY_SOURCE_DIR }}" \
-              --catalog-file "${{ env.PBY_SOURCE_DIR }}/pseudocatalogue.csv" \
-              --parquet-output-dir "${{ env.PARQUET_OUTPUT_DIR }}" \
-              --parquet-output-file "pby_dataset.parquet" \
-              --parquet-shards 10
-          else
-            echo "Source data not found. Falling back to existing JSONL-to-Parquet conversion..."
-            python gmach-otzar-hatora/jsonl_to_parquet.py \
-              --input-dir "${{ env.JSONL_SOURCE_DIR }}" \
-              --output-dir "${{ env.PARQUET_OUTPUT_DIR }}" \
-              --output-file "pby_dataset-single.parquet"
-            python project-ben-yehuda/split_parquet.py \
-              --input-file "${{ env.PARQUET_OUTPUT_DIR }}/pby_dataset-single.parquet" \
-              --output-dir "${{ env.PARQUET_OUTPUT_DIR }}" \
-              --output-file "pby_dataset.parquet" \
-              --parquet-shards 10
-            rm "${{ env.PARQUET_OUTPUT_DIR }}/pby_dataset-single.parquet"
+          if [ "$USE_LOCAL_SOURCE" = "true" ]; then
+            echo "Using checked-in Project Ben-Yehuda source data; release state will not be checked."
+            echo "tag=local-source" >> "$GITHUB_OUTPUT"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "update_state=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          if [ "$REQUESTED_RELEASE" = "latest" ]; then
+            TAG_NAME="$(gh release view --repo "$PBY_SOURCE_REPO" --json tagName --jq .tagName)"
+          else
+            TAG_NAME="$REQUESTED_RELEASE"
+          fi
+
+          SHOULD_RUN="true"
+          UPDATE_STATE="true"
+          if [ "$REQUESTED_RELEASE" != "latest" ]; then
+            UPDATE_STATE="false"
+            echo "Explicit Project Ben-Yehuda release requested; state variable will not be updated."
+          elif [ "$FORCE_REBUILD" = "true" ]; then
+            echo "Force rebuild requested for latest Project Ben-Yehuda release."
+          elif [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "$LAST_PROCESSED_RELEASE" ] && [ "$TAG_NAME" = "$LAST_PROCESSED_RELEASE" ]; then
+              SHOULD_RUN="false"
+              UPDATE_STATE="false"
+              echo "Project Ben-Yehuda release $TAG_NAME was already uploaded. Skipping rebuild."
+            fi
+          fi
+
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "should_run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
+          echo "update_state=$UPDATE_STATE" >> "$GITHUB_OUTPUT"
+          echo "Using Project Ben-Yehuda release: $TAG_NAME"
+
+      - name: Download Project Ben-Yehuda release assets
+        if: ${{ steps.release.outputs.should_run == 'true' && (inputs.use_local_source || 'false') != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf "$PBY_SOURCE_DIR"
+          mkdir -p "$PBY_SOURCE_DIR"
+          gh release download "${{ steps.release.outputs.tag }}" \
+            --repo "$PBY_SOURCE_REPO" \
+            --pattern "$PBY_TEXT_ARCHIVE" \
+            --pattern "$PBY_CATALOG_ASSET" \
+            --dir "$PBY_SOURCE_DIR" \
+            --clobber
+          unzip -q "$PBY_SOURCE_DIR/$PBY_TEXT_ARCHIVE" -d "$PBY_SOURCE_DIR"
+
+      # שלב 4: הכנת Parquet להעלאה.
+      # ברירת המחדל בונה מה-assets של GitHub Release; בהרצה ידנית ניתן לבחור מקור מקומי.
+      - name: Build Parquet dataset
+        if: ${{ steps.release.outputs.should_run == 'true' }}
+        run: |
+          if [ ! -f "$PBY_SOURCE_DIR/$PBY_CATALOG_ASSET" ]; then
+            echo "No existing Parquet files or source catalog found. Cannot build dataset."
+            exit 1
+          fi
+          PBY_TEXT_SOURCE_DIR="$PBY_SOURCE_DIR"
+          if [ -d "$PBY_SOURCE_DIR/txt" ]; then
+            PBY_TEXT_SOURCE_DIR="$PBY_SOURCE_DIR/txt"
+          fi
+          echo "Building Parquet directly from Project Ben-Yehuda source files..."
+          python project-ben-yehuda/create_dataset.py \
+            --source-dir "$PBY_TEXT_SOURCE_DIR" \
+            --catalog-file "$PBY_SOURCE_DIR/$PBY_CATALOG_ASSET" \
+            --parquet-output-dir "$PARQUET_OUTPUT_DIR" \
+            --parquet-output-file "pby_dataset.parquet" \
+            --parquet-shards 10
           echo "Parquet build complete."
 
       # שלב 5: הרצת סקריפט ההעלאה עם תיקיית ה-Parquet
       - name: Run upload script
+        if: ${{ steps.release.outputs.should_run == 'true' }}
         env:
           # העברת הטוקן הסודי של Hugging Face (שהוגדר כבר בריפו)
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
@@ -92,3 +167,10 @@ jobs:
             --local-dir ${{ env.PARQUET_OUTPUT_DIR }} \
             --delete-pattern "data/*.parquet" \
             --commit-message "Update Project Ben-Yehuda dataset"
+
+      - name: Remember uploaded Project Ben-Yehuda release
+        if: ${{ steps.release.outputs.should_run == 'true' && steps.release.outputs.update_state == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh variable set LAST_PBY_RELEASE --body "${{ steps.release.outputs.tag }}"

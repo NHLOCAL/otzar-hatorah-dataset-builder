@@ -10,6 +10,6 @@ pypdf
 # For uploading (upload_directory_to_hf.py)
 huggingface_hub
 
-# For Parquet conversion (jsonl_to_parquet.py)
+# For direct Parquet dataset builds
 pandas
 pyarrow

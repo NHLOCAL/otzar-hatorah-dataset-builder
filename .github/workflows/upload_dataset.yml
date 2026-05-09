@@ -1,15 +1,15 @@
-name: Convert and Upload Otzar HaTorah Dataset
+name: Upload Otzar HaTorah Dataset
 
 on:
-  # הפעלה אוטומטית כאשר יש push לענף הראשי שמשנה קבצים בתיקיית המשנה
+  # הפעלה אוטומטית כאשר יש push לענף הראשי שמשנה קבצי Parquet או קוד רלוונטי
   push:
     branches:
       - main
       - alonim
     paths:
-      - 'gmach-otzar-hatora/output_dataset/**'
+      - 'gmach-otzar-hatora/output_parquet/**'
+      - 'gmach-otzar-hatora/create_dataset_markdown.py'
       - 'scripts/upload_directory_to_hf.py'
-      - 'gmach-otzar-hatora/jsonl_to_parquet.py'
   
   # הפעלה ידנית דרך ממשק ה-Actions ב-GitHub
   workflow_dispatch:
@@ -17,10 +17,8 @@ on:
 env:
   # הגדר כאן את שם ריפו הדאטהסט שלך ב-Hugging Face
   HF_DATASET_REPO_ID: "nhlocal/otzar-hatorah"
-  # שם התיקייה המקומית שמכילה את קבצי ה-JSONL
-  JSONL_SOURCE_DIR: "gmach-otzar-hatora/output_dataset"
-  # שם התיקייה אליה יכתבו קבצי ה-Parquet
-  PARQUET_OUTPUT_DIR: "gmach-otzar-hatora/converted_parquet"
+  # שם התיקייה המקומית שמכילה את קבצי ה-Parquet
+  PARQUET_SOURCE_DIR: "gmach-otzar-hatora/output_parquet"
 
 jobs:
   build-and-upload:
@@ -38,23 +36,29 @@ jobs:
         with:
           python-version: '3.11'
 
-      # שלב 3: התקנת הספריות הנדרשות (כולל תלויות להמרה)
+      # שלב 3: התקנת הספריות הנדרשות
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           # הנתיב לקובץ הדרישות נשאר כפי שהיה, בהנחה שהוא בתיקייה הראשית
           pip install -r requirements.txt
 
-      # שלב 4: המרת קבצי JSONL לפורמט Parquet
-      - name: Convert JSONL to Parquet
+      # שלב 4: בדיקת קבצי Parquet
+      - name: Verify Parquet dataset
         run: |
-          echo "Starting conversion from '${{ env.JSONL_SOURCE_DIR }}' to '${{ env.PARQUET_OUTPUT_DIR }}'..."
-          # הפקודה מעבירה נתיבים מפורשים, שידרסו את ברירות המחדל בסקריפט
-          python gmach-otzar-hatora/jsonl_to_parquet.py \
-            --input-dir ${{ env.JSONL_SOURCE_DIR }} \
-            --output-dir ${{ env.PARQUET_OUTPUT_DIR }} \
-            --output-file "all_data_combined.parquet"
-          echo "Conversion complete."
+          if ! find "${{ env.PARQUET_SOURCE_DIR }}" -maxdepth 1 -name "*.parquet" -print -quit | grep -q .; then
+            echo "No Parquet files found in '${{ env.PARQUET_SOURCE_DIR }}'."
+            exit 1
+          fi
+          python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          parquet_dir = Path("${{ env.PARQUET_SOURCE_DIR }}")
+          files = sorted(parquet_dir.glob("*.parquet"))
+          rows = sum(len(pd.read_parquet(path)) for path in files)
+          print(f"Verified {len(files)} Parquet file(s), {rows} row(s).")
+          PY
 
       # שלב 5: הרצת סקריפט ההעלאה עם תיקיית ה-Parquet
       - name: Run upload script
@@ -62,9 +66,9 @@ jobs:
           # העברת הטוקן הסודי של Hugging Face
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
-          echo "Uploading directory '${{ env.PARQUET_OUTPUT_DIR }}' to Hugging Face..."
+          echo "Uploading directory '${{ env.PARQUET_SOURCE_DIR }}' to Hugging Face..."
           python scripts/upload_directory_to_hf.py \
             --repo-id ${{ env.HF_DATASET_REPO_ID }} \
-            --local-dir ${{ env.PARQUET_OUTPUT_DIR }} \
+            --local-dir ${{ env.PARQUET_SOURCE_DIR }} \
             --delete-pattern "data/*.parquet" \
             --commit-message "Update Otzar HaTorah dataset"
