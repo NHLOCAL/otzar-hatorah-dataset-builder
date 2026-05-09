@@ -144,6 +144,8 @@ python -m unittest discover -s project-ben-yehuda/tests
 
 ## הערות CI
 
-`source_data` אינו מנוהל ב-git. ה-workflow של GitHub Actions משתמש בקבצי
-Parquet קיימים אם הם זמינים בתיקיית הפלט, או בונה אותם ישירות מקובצי המקור
-כאשר `source_data/pseudocatalogue.csv` זמין בסביבת הריצה.
+`source_data` אינו מנוהל ב-git. ה-workflow של GitHub Actions מוריד כברירת
+מחדל את `txt.zip` ואת `pseudocatalogue.csv` מה-release של
+`projectbenyehuda/public_domain_dump`, בונה מהם Parquet ומעלה את הפלט
+ל-Hugging Face. בהרצה ידנית ניתן להגדיר `use_local_source=true` כדי לבנות
+מ-`project-ben-yehuda/source_data` המקומי במקום להוריד release assets.
