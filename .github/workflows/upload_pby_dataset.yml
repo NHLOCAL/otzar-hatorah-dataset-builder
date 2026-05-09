@@ -14,6 +14,8 @@ on:
       - 'scripts/upload_directory_to_hf.py'
       - 'requirements.txt'
       - '.github/workflows/upload_pby_dataset.yml'
+  schedule:
+    - cron: '47 2 * * 2,5'
   
   # הפעלה ידנית דרך ממשק ה-Actions ב-GitHub
   workflow_dispatch:
@@ -26,6 +28,18 @@ on:
         description: "Use checked-in project-ben-yehuda/source_data instead of downloading release assets"
         required: false
         default: "false"
+      force_rebuild:
+        description: "Rebuild even if the latest release was already uploaded"
+        required: false
+        default: "false"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: upload-pby-dataset
+  cancel-in-progress: false
 
 env:
   # הגדרת שם ריפו הדאטהסט שלך ב-Hugging Face
@@ -60,23 +74,51 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Resolve Project Ben-Yehuda release
+      - name: Resolve Project Ben-Yehuda release and check upload state
         id: release
-        if: ${{ (inputs.use_local_source || 'false') != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_RELEASE: ${{ inputs.pby_release || 'latest' }}
+          USE_LOCAL_SOURCE: ${{ inputs.use_local_source || 'false' }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild || 'false' }}
+          LAST_PROCESSED_RELEASE: ${{ vars.LAST_PBY_RELEASE }}
         run: |
+          if [ "$USE_LOCAL_SOURCE" = "true" ]; then
+            echo "Using checked-in Project Ben-Yehuda source data; release state will not be checked."
+            echo "tag=local-source" >> "$GITHUB_OUTPUT"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "update_state=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [ "$REQUESTED_RELEASE" = "latest" ]; then
             TAG_NAME="$(gh release view --repo "$PBY_SOURCE_REPO" --json tagName --jq .tagName)"
           else
             TAG_NAME="$REQUESTED_RELEASE"
           fi
+
+          SHOULD_RUN="true"
+          UPDATE_STATE="true"
+          if [ "$REQUESTED_RELEASE" != "latest" ]; then
+            UPDATE_STATE="false"
+            echo "Explicit Project Ben-Yehuda release requested; state variable will not be updated."
+          elif [ "$FORCE_REBUILD" = "true" ]; then
+            echo "Force rebuild requested for latest Project Ben-Yehuda release."
+          elif [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "$LAST_PROCESSED_RELEASE" ] && [ "$TAG_NAME" = "$LAST_PROCESSED_RELEASE" ]; then
+              SHOULD_RUN="false"
+              UPDATE_STATE="false"
+              echo "Project Ben-Yehuda release $TAG_NAME was already uploaded. Skipping rebuild."
+            fi
+          fi
+
           echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "should_run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
+          echo "update_state=$UPDATE_STATE" >> "$GITHUB_OUTPUT"
           echo "Using Project Ben-Yehuda release: $TAG_NAME"
 
       - name: Download Project Ben-Yehuda release assets
-        if: ${{ (inputs.use_local_source || 'false') != 'true' }}
+        if: ${{ steps.release.outputs.should_run == 'true' && (inputs.use_local_source || 'false') != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -93,6 +135,7 @@ jobs:
       # שלב 4: הכנת Parquet להעלאה.
       # ברירת המחדל בונה מה-assets של GitHub Release; בהרצה ידנית ניתן לבחור מקור מקומי.
       - name: Build Parquet dataset
+        if: ${{ steps.release.outputs.should_run == 'true' }}
         run: |
           if [ ! -f "$PBY_SOURCE_DIR/$PBY_CATALOG_ASSET" ]; then
             echo "No existing Parquet files or source catalog found. Cannot build dataset."
@@ -113,6 +156,7 @@ jobs:
 
       # שלב 5: הרצת סקריפט ההעלאה עם תיקיית ה-Parquet
       - name: Run upload script
+        if: ${{ steps.release.outputs.should_run == 'true' }}
         env:
           # העברת הטוקן הסודי של Hugging Face (שהוגדר כבר בריפו)
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
@@ -123,3 +167,10 @@ jobs:
             --local-dir ${{ env.PARQUET_OUTPUT_DIR }} \
             --delete-pattern "data/*.parquet" \
             --commit-message "Update Project Ben-Yehuda dataset"
+
+      - name: Remember uploaded Project Ben-Yehuda release
+        if: ${{ steps.release.outputs.should_run == 'true' && steps.release.outputs.update_state == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh variable set LAST_PBY_RELEASE --body "${{ steps.release.outputs.tag }}"

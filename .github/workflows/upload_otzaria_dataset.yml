@@ -11,17 +11,29 @@ on:
       - 'requirements.txt'
       - '.github/workflows/upload_otzaria_dataset.yml'
   schedule:
-    - cron: '0 2 * * 1'
+    - cron: '17 2 * * 1,4'
   workflow_dispatch:
     inputs:
       otzaria_release:
         description: "Otzaria release tag to process, or latest"
         required: false
         default: "latest"
+      force_rebuild:
+        description: "Rebuild even if the latest release was already uploaded"
+        required: false
+        default: "false"
       parquet_target_file_size_mb:
         description: "Approximate Parquet shard size in MB"
         required: false
         default: "128"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: upload-otzaria-dataset
+  cancel-in-progress: false
 
 env:
   HF_OTZARIA_DATASET_REPO_ID: "NHLOCAL/judaic-texts-corpus"
@@ -47,21 +59,42 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Resolve Otzaria release
+      - name: Resolve Otzaria release and check upload state
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_RELEASE: ${{ inputs.otzaria_release || 'latest' }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild || 'false' }}
+          LAST_PROCESSED_RELEASE: ${{ vars.LAST_OTZARIA_RELEASE }}
         run: |
           if [ "$REQUESTED_RELEASE" = "latest" ]; then
             TAG_NAME="$(gh release view --repo "$OTZARIA_SOURCE_REPO" --json tagName --jq .tagName)"
           else
             TAG_NAME="$REQUESTED_RELEASE"
           fi
+
+          SHOULD_RUN="true"
+          UPDATE_STATE="true"
+          if [ "$REQUESTED_RELEASE" != "latest" ]; then
+            UPDATE_STATE="false"
+            echo "Explicit Otzaria release requested; state variable will not be updated."
+          elif [ "$FORCE_REBUILD" = "true" ]; then
+            echo "Force rebuild requested for latest Otzaria release."
+          elif [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "$LAST_PROCESSED_RELEASE" ] && [ "$TAG_NAME" = "$LAST_PROCESSED_RELEASE" ]; then
+              SHOULD_RUN="false"
+              UPDATE_STATE="false"
+              echo "Otzaria release $TAG_NAME was already uploaded. Skipping rebuild."
+            fi
+          fi
+
           echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "should_run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
+          echo "update_state=$UPDATE_STATE" >> "$GITHUB_OUTPUT"
           echo "Using Otzaria release: $TAG_NAME"
 
       - name: Download Otzaria release archive
+        if: ${{ steps.release.outputs.should_run == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -73,11 +106,13 @@ jobs:
             --clobber
 
       - name: Extract release metadata files
+        if: ${{ steps.release.outputs.should_run == 'true' }}
         run: |
           unzip -p "$OTZARIA_SOURCE_DIR/$OTZARIA_RELEASE_ASSET" files_manifest.json > "$OTZARIA_SOURCE_DIR/files_manifest.json"
           unzip -p "$OTZARIA_SOURCE_DIR/$OTZARIA_RELEASE_ASSET" metadata.json > "$OTZARIA_SOURCE_DIR/metadata.json"
 
       - name: Build Parquet dataset
+        if: ${{ steps.release.outputs.should_run == 'true' }}
         env:
           TARGET_FILE_SIZE_MB: ${{ inputs.parquet_target_file_size_mb || '128' }}
         run: |
@@ -92,6 +127,7 @@ jobs:
             --batch-size 512
 
       - name: Upload Parquet files to Hugging Face
+        if: ${{ steps.release.outputs.should_run == 'true' }}
         env:
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
@@ -101,3 +137,10 @@ jobs:
             --path-in-repo "data" \
             --delete-pattern "data/*.parquet" \
             --commit-message "Update Otzaria dataset from ${{ steps.release.outputs.tag }}"
+
+      - name: Remember uploaded Otzaria release
+        if: ${{ steps.release.outputs.should_run == 'true' && steps.release.outputs.update_state == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh variable set LAST_OTZARIA_RELEASE --body "${{ steps.release.outputs.tag }}"
