@@ -171,6 +171,12 @@ jobs:
       - name: Remember uploaded Project Ben-Yehuda release
         if: ${{ steps.release.outputs.should_run == 'true' && steps.release.outputs.update_state == 'true' }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          ACTIONS_VARIABLES_TOKEN: ${{ secrets.ACTIONS_VARIABLES_TOKEN }}
         run: |
+          if [ -z "$ACTIONS_VARIABLES_TOKEN" ]; then
+            echo "Skipping repository variable update because ACTIONS_VARIABLES_TOKEN is not configured."
+            exit 0
+          fi
+
+          export GH_TOKEN="$ACTIONS_VARIABLES_TOKEN"
           gh variable set LAST_PBY_RELEASE --body "${{ steps.release.outputs.tag }}"
