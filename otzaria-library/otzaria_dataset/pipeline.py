@@ -62,6 +62,7 @@ class PipelineConfig:
     compression: str = "zstd"
     clean_output: bool = True
     show_progress: bool = True
+    archive_paths: tuple[Path, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -270,7 +271,7 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
 
     try:
         batch: list[dict] = []
-        entries = iter_zip_text_entries(config.archive_path)
+        entries = iter_config_zip_text_entries(config)
         if config.show_progress:
             entries = tqdm(entries, desc="Processing Otzaria texts", unit="file")
 
@@ -338,9 +339,18 @@ def iter_zip_text_entries(archive_path: Path) -> Iterator[_ZipTextEntry]:
             yield _ZipTextEntry(normalized_path, text)
 
 
+def iter_config_zip_text_entries(config: PipelineConfig) -> Iterator[_ZipTextEntry]:
+    for archive_path in _resolve_archive_paths(config):
+        yield from iter_zip_text_entries(archive_path)
+
+
 def _validate_config(config: PipelineConfig) -> None:
-    if not config.archive_path.exists():
-        raise FileNotFoundError(f"Archive was not found: {config.archive_path}")
+    archive_paths = _resolve_archive_paths(config)
+    if not archive_paths:
+        raise FileNotFoundError("At least one archive path is required")
+    for archive_path in archive_paths:
+        if not archive_path.exists():
+            raise FileNotFoundError(f"Archive was not found: {archive_path}")
     if config.batch_size < 1:
         raise ValueError("batch_size must be at least 1")
     if not config.parquet_output_file.endswith(".parquet"):
@@ -376,7 +386,7 @@ def _resolve_parquet_records_per_file(config: PipelineConfig) -> int | None:
 def _count_candidate_records(config: PipelineConfig) -> int:
     seen_text_hashes: set[str] = set()
     count = 0
-    for entry in iter_zip_text_entries(config.archive_path):
+    for entry in iter_config_zip_text_entries(config):
         if entry.source_path == "" or not entry.text.strip():
             continue
         if config.deduplicate_text:
@@ -386,6 +396,10 @@ def _count_candidate_records(config: PipelineConfig) -> int:
             seen_text_hashes.add(text_hash)
         count += 1
     return count
+
+
+def _resolve_archive_paths(config: PipelineConfig) -> tuple[Path, ...]:
+    return config.archive_paths or (config.archive_path,)
 
 
 def _target_file_size_bytes(config: PipelineConfig) -> int | None:

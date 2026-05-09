@@ -29,6 +29,13 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--archive-path", type=Path, default=DEFAULT_ARCHIVE_PATH)
+    parser.add_argument(
+        "--extra-archive-path",
+        type=Path,
+        action="append",
+        default=[],
+        help="Additional Otzaria release archive to include. Can be passed more than once.",
+    )
     parser.add_argument("--manifest-path", type=Path, default=DEFAULT_MANIFEST_PATH)
     parser.add_argument("--metadata-path", type=Path, default=DEFAULT_METADATA_PATH)
     parser.add_argument("--parquet-output-dir", type=Path, default=DEFAULT_PARQUET_OUTPUT_DIR)
@@ -41,6 +48,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--github-release", default="latest")
     parser.add_argument("--github-repo", default=DEFAULT_REPO)
     parser.add_argument("--release-asset", default=DEFAULT_RELEASE_ASSET)
+    parser.add_argument(
+        "--extra-release-asset",
+        action="append",
+        default=[],
+        help="Additional release asset to download into source_data. Can be passed more than once.",
+    )
     parser.add_argument("--download-release-asset", action="store_true")
     parser.add_argument("--overwrite-download", action="store_true")
     parser.add_argument("--no-deduplicate", action="store_true")
@@ -52,6 +65,7 @@ def main() -> None:
     args = parse_args()
 
     archive_path = args.archive_path
+    extra_archive_paths = list(args.extra_archive_path)
     if args.download_release_asset:
         print(
             f"Downloading {args.github_repo}@{args.github_release} asset "
@@ -64,10 +78,25 @@ def main() -> None:
             output_dir=DEFAULT_SOURCE_DIR,
             overwrite=args.overwrite_download,
         )
+        for asset_name in args.extra_release_asset:
+            print(
+                f"Downloading {args.github_repo}@{args.github_release} asset "
+                f"{asset_name} into {DEFAULT_SOURCE_DIR}"
+            )
+            extra_archive_paths.append(
+                download_release_asset(
+                    repo=args.github_repo,
+                    release=args.github_release,
+                    asset_name=asset_name,
+                    output_dir=DEFAULT_SOURCE_DIR,
+                    overwrite=args.overwrite_download,
+                )
+            )
 
     config = PipelineConfig(
         archive_path=archive_path,
         parquet_output_dir=args.parquet_output_dir,
+        archive_paths=(archive_path, *extra_archive_paths),
         parquet_output_file=args.parquet_output_file,
         manifest_path=args.manifest_path,
         metadata_path=args.metadata_path,
@@ -82,7 +111,9 @@ def main() -> None:
     )
 
     print("Building Otzaria Library dataset")
-    print(f"Archive: {config.archive_path}")
+    print("Archives:")
+    for path in config.archive_paths or (config.archive_path,):
+        print(f"  - {path}")
     print(f"Manifest: {config.manifest_path}")
     print(f"Metadata: {config.metadata_path}")
     print(f"Parquet output directory: {config.parquet_output_dir}")

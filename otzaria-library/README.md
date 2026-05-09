@@ -6,8 +6,9 @@
 [NHLOCAL/judaic-texts-corpus](https://huggingface.co/datasets/NHLOCAL/judaic-texts-corpus).
 
 המסלול כאן לא משכפל את ריפו המקור המלא. במקום זאת הוא מוריד רק את קובץ
-ה-Release הרשמי `otzaria_latest.zip`, קורא ממנו קובצי `.txt` ב-streaming,
-ומייצר קובצי Parquet מפוצלים תחת `output_parquet`.
+ה-Release הרשמי `otzaria_latest.zip`, ובנוסף את `otzaria_dicta_latest.zip`
+כאשר הוא זמין באותו Release, קורא מהם קובצי `.txt` ב-streaming, ומייצר
+קובצי Parquet מפוצלים תחת `output_parquet`.
 
 ## מבנה תיקייה
 
@@ -27,6 +28,7 @@ otzaria-library/
 ברירת המחדל מצפה לקבצים הבאים תחת `otzaria-library/source_data`:
 
 - `otzaria_latest.zip`
+- `otzaria_dicta_latest.zip` אם רוצים לכלול גם את ספרי Dicta
 - `files_manifest.json`
 - `metadata.json`
 
@@ -41,6 +43,7 @@ otzaria-library/
 python otzaria-library/create_dataset.py `
   --download-release-asset `
   --github-release latest `
+  --extra-release-asset otzaria_dicta_latest.zip `
   --parquet-target-file-size-mb 128
 ```
 
@@ -49,9 +52,10 @@ python otzaria-library/create_dataset.py `
 ```powershell
 python otzaria-library/create_dataset.py `
   --archive-path otzaria-library/source_data/otzaria_latest.zip `
+  --extra-archive-path otzaria-library/source_data/otzaria_dicta_latest.zip `
   --manifest-path otzaria-library/source_data/files_manifest.json `
   --metadata-path otzaria-library/source_data/metadata.json `
-  --github-release library-140
+  --github-release library-143
 ```
 
 ## פלט
@@ -88,7 +92,7 @@ otzaria-library/output_parquet/judaic_texts-part-00002.parquet
 
 ה-workflow `.github/workflows/upload_otzaria_dataset.yml`:
 
-1. מוריד את `otzaria_latest.zip` מה-Release הנבחר של `Otzaria/otzaria-library`.
+1. מוריד את `otzaria_latest.zip` ואת `otzaria_dicta_latest.zip` מה-Release הנבחר של `Otzaria/otzaria-library`.
 2. מחלץ ממנו `files_manifest.json` ו-`metadata.json`.
 3. בונה קובצי Parquet מפוצלים.
 4. מעלה אותם אל `NHLOCAL/judaic-texts-corpus` תחת `data/`.
@@ -109,7 +113,7 @@ data/*.parquet
 
 ניתן להריץ ידנית דרך GitHub Actions ולבחור:
 
-- `otzaria_release`: תג Release, למשל `library-140`, או `latest`.
+- `otzaria_release`: תג Release, למשל `library-143`, או `latest`.
 - `parquet_target_file_size_mb`: גודל shard משוער, ברירת מחדל `128`.
 
 ## יעילות

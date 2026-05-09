@@ -22,14 +22,16 @@ class OtzariaPipelineTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.archive_path = self.root / "otzaria_latest.zip"
+        self.dicta_archive_path = self.root / "otzaria_dicta_latest.zip"
         self.manifest_path = self.root / "files_manifest.json"
         self.metadata_path = self.root / "metadata.json"
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def write_archive(self, files):
-        with zipfile.ZipFile(self.archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    def write_archive(self, files, path=None):
+        archive_path = path or self.archive_path
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for path, content in files.items():
                 archive.writestr(path, content)
 
@@ -147,6 +149,59 @@ class OtzariaPipelineTests(unittest.TestCase):
         for path in result.parquet_paths:
             all_rows.extend(pq.read_table(path).to_pylist())
         self.assertEqual([row["metadata"]["author"] for row in all_rows], ["מחבר א", "מחבר ב"])
+
+    def test_build_dataset_combines_multiple_archives_and_deduplicates_across_them(self):
+        self.write_archive(
+            {
+                "main/ספרים/אוצריא/תלמוד/ברכות.txt": "טקסט ראשון",
+                "main/ספרים/אוצריא/הלכה/כפול.txt": "טקסט כפול",
+            }
+        )
+        self.write_archive(
+            {
+                "dicta/ספרים/אוצריא/דיקטה/ספר דיקטה.txt": "טקסט דיקטה",
+                "dicta/ספרים/אוצריא/דיקטה/כפול דיקטה.txt": "טקסט כפול",
+            },
+            path=self.dicta_archive_path,
+        )
+        self.write_json(self.manifest_path, {})
+        self.write_json(
+            self.metadata_path,
+            [
+                {"title": "ברכות", "author": "מחבר א"},
+                {"title": "ספר דיקטה", "author": "מחבר דיקטה"},
+            ],
+        )
+
+        output_dir = self.root / "output_parquet"
+        result = build_dataset(
+            PipelineConfig(
+                archive_path=self.archive_path,
+                archive_paths=(self.archive_path, self.dicta_archive_path),
+                parquet_output_dir=output_dir,
+                parquet_output_file="judaic_texts.parquet",
+                manifest_path=self.manifest_path,
+                metadata_path=self.metadata_path,
+                github_release="library-143",
+                parquet_shards=1,
+                batch_size=10,
+                show_progress=False,
+            )
+        )
+
+        self.assertEqual(result.processed_records, 3)
+        self.assertEqual(result.duplicate_records, 1)
+
+        rows = pq.read_table(result.parquet_paths[0]).to_pylist()
+        self.assertEqual(
+            [row["metadata"]["source_path"] for row in rows],
+            [
+                "main/ספרים/אוצריא/תלמוד/ברכות.txt",
+                "main/ספרים/אוצריא/הלכה/כפול.txt",
+                "dicta/ספרים/אוצריא/דיקטה/ספר דיקטה.txt",
+            ],
+        )
+        self.assertEqual([row["metadata"]["github_release"] for row in rows], ["library-143"] * 3)
 
 
 if __name__ == "__main__":

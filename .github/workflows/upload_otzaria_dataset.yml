@@ -41,6 +41,7 @@ env:
   OTZARIA_SOURCE_DIR: "otzaria-library/source_data"
   OTZARIA_PARQUET_OUTPUT_DIR: "otzaria-library/output_parquet"
   OTZARIA_RELEASE_ASSET: "otzaria_latest.zip"
+  OTZARIA_DICTA_RELEASE_ASSET: "otzaria_dicta_latest.zip"
 
 jobs:
   build-and-upload-otzaria:
@@ -99,11 +100,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$OTZARIA_SOURCE_DIR"
-          gh release download "${{ steps.release.outputs.tag }}" \
-            --repo "$OTZARIA_SOURCE_REPO" \
-            --pattern "$OTZARIA_RELEASE_ASSET" \
-            --dir "$OTZARIA_SOURCE_DIR" \
-            --clobber
+          for ASSET in "$OTZARIA_RELEASE_ASSET" "$OTZARIA_DICTA_RELEASE_ASSET"; do
+            gh release download "${{ steps.release.outputs.tag }}" \
+              --repo "$OTZARIA_SOURCE_REPO" \
+              --pattern "$ASSET" \
+              --dir "$OTZARIA_SOURCE_DIR" \
+              --clobber
+          done
 
       - name: Extract release metadata files
         if: ${{ steps.release.outputs.should_run == 'true' }}
@@ -118,6 +121,7 @@ jobs:
         run: |
           python otzaria-library/create_dataset.py \
             --archive-path "$OTZARIA_SOURCE_DIR/$OTZARIA_RELEASE_ASSET" \
+            --extra-archive-path "$OTZARIA_SOURCE_DIR/$OTZARIA_DICTA_RELEASE_ASSET" \
             --manifest-path "$OTZARIA_SOURCE_DIR/files_manifest.json" \
             --metadata-path "$OTZARIA_SOURCE_DIR/metadata.json" \
             --parquet-output-dir "$OTZARIA_PARQUET_OUTPUT_DIR" \
