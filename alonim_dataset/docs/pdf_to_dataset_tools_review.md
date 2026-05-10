@@ -210,15 +210,79 @@ Links:
 * הסרת headers ו־footers חוזרים
 * שמירת כיוון `rtl` ב־HTML/Markdown לפי הצורך
 
+## Actual Conversion Trials
+
+נבדקו בפועל כמה עלונים מתוך `alonim_dataset/source_data/pdf` כדי להשוות בין
+המקור לבין תוצאות ההמרה ולזהות כשלים שחוזרים לפי סדרת עלונים.
+
+הדוגמאות שנבדקו:
+
+* `תשפ_ג/בראשית/ויקרא שמם אדם/מאמרי הרב מרדכי בלס.pdf`
+* `תשפ_ג/ויקרא/פרשת ויקרא/מתיקות הפרשה - הרב אריה לוין.pdf`
+* `תשפ_ג/בראשית/פרשת בראשית, הגדרת יום ולילה/שיעורי ליל שישי - ישיבת ברכת יצחק.pdf`
+
+### Docling
+
+Docling נבדק עם הפרמטרים המומלצים:
+
+```powershell
+docling --to json --from pdf --no-ocr --pdf-backend pypdfium2 --image-export-mode placeholder <נתיב קובץ>
+```
+
+תוצאות בפועל:
+
+* החילוץ הטקסטואלי בעברית היה הטוב ביותר מבין הכלים שנבדקו בפועל.
+* ברוב גוף הטקסט Docling החזיר עברית בסדר לוגי תקין, בניגוד לכלים שהחזירו טקסט הפוך או סדר קריאה חזותי בלבד.
+* פלט JSON של Docling נתן `bbox`, מספרי עמודים, labels ויחסי children שמאפשרים לבנות שכבת post-processing אמינה.
+* ב־`מאמרי הרב מרדכי בלס` זוהה מבנה דו־עמודי קבוע יחסית. יש לקרוא עמודה ימנית לפני שמאלית, תוך שמירה על כותרות/בלוקים מרכזיים לפני העמודות.
+* ב־`מתיקות הפרשה` חלק מטקסט המותג והכותרת הופיע כ־children של `picture`. אם מדלגים על children של תמונה, מאבדים טקסט אמיתי מהכותרת.
+* ב־`מתיקות הפרשה` טקסט מנוקד בפסוקים יצא לעיתים עם רווחים מלאכותיים בתוך מילים, למשל תבניות בסגנון `דַּ בֵּר אֶ ל`. נדרש נרמול ייעודי שמאחה רווחים אחרי סימני ניקוד עבריים.
+* ב־`שיעורי ליל שישי - ישיבת ברכת יצחק` רוב המסמך מתנהג כעמודה אחת רחבה. פיצול אגרסיבי לעמודות עלול להזיק, ולכן נדרש profile שומר סדר אנכי.
+* שמירת פלט לפי `pdf_path.stem` בלבד אינה מספיקה: שמות כמו `מאמרי הרב מרדכי בלס.pdf`, `מתיקות הפרשה - הרב אריה לוין.pdf`, ו־`שיעורי ליל שישי - ישיבת ברכת יצחק.pdf` חוזרים בתיקיות רבות. בפועל נמצאו עשרות מופעים חוזרים, ולכן פלטי JSON/Markdown חייבים לשמר את הנתיב היחסי מתחת ל־`source_data/pdf`.
+
+מסקנה: Docling הוא מנוע ההמרה הראשי המתאים ביותר כרגע, אבל רק יחד עם שכבת post-processing לפי סדרה: שמירת נתיב יחסי, פרופילי layout, הכללת children של `picture`, ונרמול עברית/RTL.
+
+### pdfplumber
+
+נבדק כ־debug extractor ישיר על עמוד ראשון מהדוגמאות.
+
+תוצאות בפועל:
+
+* הטקסט העברי חזר בסדר חזותי הפוך, למשל שורות עבריות נקראו מימין לשמאל אך נשמרו כטקסט הפוך.
+* ב־`מאמרי הרב מרדכי בלס` וב־`שיעורי ליל שישי` ניתן לראות את תוכן המקור, אבל הוא דורש היפוך/שחזור משמעותי לפני שימוש כדאטהסט.
+* היתרון העיקרי הוא גישה לקואורדינטות ולניתוח עמוד ידני, לא יצירת Markdown סופי.
+
+מסקנה: pdfplumber אינו מתאים כמנוע ראשי לעלונים בעברית, אבל הוא כלי שימושי לאבחון `bbox`, בדיקת סדר שורות, ותיקון נקודתי של אזורים בעייתיים.
+
+### MarkItDown
+
+נבדק דרך `alonim_dataset/scripts/pdf_to_md_reversed.py`, כלומר המרה עם MarkItDown ולאחר מכן `python-bidi`.
+
+תוצאות בפועל:
+
+* ב־`מאמרי הרב מרדכי בלס` התקבל טקסט קריא בחלקו, אך סדר הקריאה היה מעורבב: סוף/אמצע העמודות הופיעו לפני פתיחת המאמר, ופסקאות הוצמדו זו לזו.
+* ב־`מתיקות הפרשה` התקבלו קטעים רבים בסדר קריאה לא יציב, עם ערבוב בין כותרת, גוף, וקטעי המשך.
+* הפעלת `python-bidi` על פלט שטוח שיפרה תצוגה מסוימת, אך לא פתרה את בעיית layout והעמודות.
+
+מסקנה: MarkItDown אינו מתאים כרגע כמנוע ראשי לעלוני BeInenu. ניתן לשמור אותו ככלי השוואה מהיר או fallback נקודתי, אך לא לבנות עליו pipeline איכותי לדאטהסט עברי.
+
+### Tools Not Yet Validated In This Run
+
+Marker, PyMuPDF4LLM, Camelot, Unstructured ו־MinerU נשארים מועמדים להשוואות עתידיות, אך לא הורצו בפועל במסגרת בדיקת הדוגמאות הנוכחית. אין להסיק מהמסמך שהם טובים או גרועים יותר לעלונים עבריים עד שתתבצע הרצה מדגמית זהה ותתועד תוצאה בפועל.
+
 ## Suggested Pipeline
 
 1. Convert PDF with Docling.
-2. Export structured JSON, not only Markdown.
-3. Normalize Hebrew and RTL.
-4. Detect low quality pages or blocks.
-5. Retry problematic pages with Marker or PyMuPDF4LLM.
-6. Use pdfplumber for manual coordinate-based fixes.
-7. Export final dataset as Parquet.
+2. Save JSON under `intermediate/docling_json` with the same relative path as the source PDF under `source_data/pdf`.
+3. Export structured JSON, not only Markdown.
+4. Detect bulletin profile by recurring series/rabbi/file path.
+5. Reconstruct reading order from Docling JSON using profile-aware layout rules.
+6. Include text children nested under `picture` nodes when they contain real text.
+7. Normalize Hebrew and RTL: parentheses, punctuation, niqqud spacing, split quote fragments, and paragraph joining.
+8. Detect low quality pages or blocks.
+9. Retry problematic pages with future validated fallbacks only when there is concrete evidence that they improve the output.
+10. Use pdfplumber for manual coordinate-based debugging and fixes.
+11. Export final dataset as Parquet.
 
 ## Suggested Output Format
 
@@ -242,11 +306,15 @@ Links:
 ברירת המחדל:
 
 ```text
-Docling -> RTL Normalizer -> Parquet Dataset
+Docling JSON -> Profile-aware Layout Reconstruction -> Hebrew/RTL Normalizer -> Markdown -> Parquet Dataset
 ```
 
-Fallback מומלץ:
+Fallback אפשרי לאחר בדיקה נקודתית:
 
 ```text
-Marker / PyMuPDF4LLM -> pdfplumber fixes -> RTL Normalizer
+Validated alternate parser -> pdfplumber coordinate fixes -> Hebrew/RTL Normalizer
 ```
+
+נכון לבדיקה הנוכחית, אין fallback שאושר כטוב יותר מ־Docling עבור הדוגמאות
+שנבדקו. הפתרון המקצועי הוא לא להחליף מנוע מיד, אלא לחזק את שכבת העיבוד
+שמעל Docling לפי סדרות העלונים החוזרות.
