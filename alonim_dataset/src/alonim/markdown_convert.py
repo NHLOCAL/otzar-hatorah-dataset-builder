@@ -34,20 +34,20 @@ def process_docling_document(data: dict) -> dict[int, list[dict]]:
 
         if item.get("label") == "picture" and "children" in item:
             for child_ref in item.get("children", []):
-                child_item = element_map.get(child_ref.get("$ref"))
+                child_ref_path = child_ref.get("$ref")
+                if not child_ref_path or child_ref_path in processed_refs:
+                    continue
+                child_item = element_map.get(child_ref_path)
                 if child_item and "text" in child_item:
+                    child_item["is_framed"] = True
                     page_no = _page_number(child_item)
-                    pages_data.setdefault(page_no, [])
-                    if child_item.get("self_ref") not in {element.get("self_ref") for element in pages_data[page_no]}:
-                        pages_data[page_no].append(child_item)
-                    processed_refs.add(child_item.get("self_ref", ""))
+                    pages_data.setdefault(page_no, []).append(child_item)
+                    processed_refs.add(child_ref_path)
             processed_refs.add(ref_path)
             continue
 
         page_no = _page_number(item)
-        pages_data.setdefault(page_no, [])
-        if ref_path not in {element.get("self_ref") for element in pages_data[page_no]}:
-            pages_data[page_no].append(item)
+        pages_data.setdefault(page_no, []).append(item)
         processed_refs.add(ref_path)
 
     return pages_data
@@ -139,13 +139,8 @@ def sort_page_elements(
     for group in (interrupting_blocks, right_col, left_col, footnotes):
         group.sort(key=sort_key, reverse=True)
 
-    if profile == BulletinProfile.BIRKAT_YITZCHAK:
-        body_items = interrupting_blocks + right_col + left_col
-        body_items.sort(key=sort_key, reverse=True)
-    elif profile in {BulletinProfile.MORDECHAI_BLASS, BulletinProfile.METIKUT_HAPARSHA}:
-        body_items = interrupting_blocks + right_col + left_col
-    else:
-        body_items = interrupting_blocks + right_col + left_col
+    body_items = interrupting_blocks + right_col + left_col
+    if profile not in {BulletinProfile.MORDECHAI_BLASS, BulletinProfile.METIKUT_HAPARSHA}:
         body_items.sort(key=sort_key, reverse=True)
     return body_items, footnotes
 

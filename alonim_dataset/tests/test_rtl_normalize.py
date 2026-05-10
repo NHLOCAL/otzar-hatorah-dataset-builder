@@ -20,6 +20,11 @@ class RtlNormalizeTests(unittest.TestCase):
 
         self.assertEqual(normalize_hebrew_text(text), '"אדם" (א\', ב\'), וכן')
 
+    def test_normalize_hebrew_text_preserves_newline_before_opening_punctuation(self) -> None:
+        text = '"title"\n(note)'
+
+        self.assertEqual(normalize_hebrew_text(text), '"title"\n(note)')
+
     def test_normalize_hebrew_text_drops_short_split_quote_fragments(self) -> None:
         self.assertEqual(normalize_hebrew_text('"'), "")
         self.assertEqual(normalize_hebrew_text('מתיקות הפרשה"'), "מתיקות הפרשה")

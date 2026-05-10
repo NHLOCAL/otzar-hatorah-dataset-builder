@@ -42,6 +42,31 @@ class MarkdownConvertTests(unittest.TestCase):
         pages = process_docling_document(data)
 
         self.assertEqual([item["text"] for item in pages[1]], ["כותרת מתוך מסגרת"])
+        self.assertTrue(pages[1][0]["is_framed"])
+
+    def test_process_docling_document_skips_picture_children_seen_as_body_text(self) -> None:
+        data = {
+            "body": {"children": [{"$ref": "#/pictures/0"}, {"$ref": "#/texts/0"}]},
+            "texts": [
+                {
+                    "self_ref": "#/texts/0",
+                    "label": "text",
+                    "text": "טקסט במסגרת",
+                    "prov": [{"page_no": 1, "bbox": {"l": 200, "t": 760, "r": 400, "b": 730}}],
+                }
+            ],
+            "pictures": [
+                {
+                    "self_ref": "#/pictures/0",
+                    "label": "picture",
+                    "children": [{"$ref": "#/texts/0"}],
+                }
+            ],
+        }
+
+        pages = process_docling_document(data)
+
+        self.assertEqual([item["text"] for item in pages[1]], ["טקסט במסגרת"])
 
     def test_two_column_rtl_profile_reads_right_column_before_left_column(self) -> None:
         elements = [

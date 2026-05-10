@@ -39,20 +39,14 @@ def _swap_parentheses(text: str) -> str:
 
 
 def _join_artificially_spaced_marked_words(text: str) -> str:
-    previous = None
-    current = text
     pattern = re.compile(rf"(?<=[{HEBREW_MARKS}])\s+(?=[{HEBREW_BLOCK}])")
-    while current != previous:
-        previous = current
-        current = pattern.sub("", current)
-    return current
+    return pattern.sub("", text)
 
 
 def _clean_punctuation_spacing(text: str) -> str:
     cleaned = text
     cleaned = re.sub(r'"\s*([^"\n]*?)\s*"', lambda match: f'"{match.group(1).strip()}"', cleaned)
-    cleaned = re.sub(rf'(?<=[{HEBREW_BLOCK}"]) (?=[\[(])', " ", cleaned)
-    cleaned = re.sub(rf'(?<=[{HEBREW_BLOCK}"])(?=[\[(])', " ", cleaned)
+    cleaned = re.sub(rf'(?<=[{HEBREW_BLOCK}"])[ \t]*(?=[\[(])', " ", cleaned)
     cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
     cleaned = re.sub(r"([,.;:!?])(?=\S)", r"\1 ", cleaned)
     cleaned = re.sub(r"([\[(])\s+", r"\1", cleaned)
