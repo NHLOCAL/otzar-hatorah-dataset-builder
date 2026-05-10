@@ -37,6 +37,12 @@ Install dependencies from the repository root or this directory:
 pip install -r alonim_dataset/requirements.txt
 ```
 
+Download Docling model artifacts:
+
+```powershell
+alonim_dataset\scripts\download_docling_models.bat
+```
+
 Download bulletins:
 
 ```powershell
