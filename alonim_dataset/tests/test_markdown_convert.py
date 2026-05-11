@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from alonim.markdown_convert import process_docling_document, sort_page_elements
+from alonim.markdown_convert import postprocess_markdown, process_docling_document, sort_page_elements
 from alonim.profiles import BulletinProfile
 
 
@@ -119,6 +119,28 @@ class MarkdownConvertTests(unittest.TestCase):
 
         self.assertEqual([item["text"] for item in body], ["ראשון", "אמצע", "אחרון"])
         self.assertEqual(footnotes, [])
+
+    def test_postprocess_markdown_splits_inline_star_section_markers(self) -> None:
+        text = 'מדוע היה חשוב שאדם יתבע זאת בפיו. *"ויקרא האדם שמות לכל הבהמה"'
+
+        processed = postprocess_markdown(text)
+
+        self.assertEqual(
+            processed,
+            'מדוע היה חשוב שאדם יתבע זאת בפיו.\n\n*\n\n"ויקרא האדם שמות לכל הבהמה"',
+        )
+
+    def test_postprocess_markdown_moves_interleaved_question_before_open_quote_section(self) -> None:
+        text = (
+            "*\n\nמקור אחד - 'תחילת ציטוט ארוך שממשיך אחרי שאלת מעבר. "
+            'והוא שהכתוב אומר "פסוק לדוגמה" (א, ב).\n\n'
+            "מהי משמעות הדברים הללו. המשך הציטוט הפתוח שנבלע אחרי השאלה"
+        )
+
+        processed = postprocess_markdown(text)
+
+        self.assertLess(processed.index("מהי משמעות הדברים הללו"), processed.index("מקור אחד"))
+        self.assertIn("(א, ב). המשך הציטוט הפתוח שנבלע אחרי השאלה", processed)
 
 
 if __name__ == "__main__":

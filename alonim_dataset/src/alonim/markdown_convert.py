@@ -81,11 +81,19 @@ def convert_docling_json_to_markdown(json_path: Path, output_path: Path | None =
             for item in footnotes:
                 content.append(f"*{clean_ocr_text(item.get('text', ''))}*\n\n")
 
-    final_output = "".join(content)
-    final_output = re.sub(r"(?<!\n)\n(?!\n|#|\*|>)", " ", final_output)
-    final_output = re.sub(r" +", " ", final_output)
+    final_output = postprocess_markdown("".join(content), profile)
     output_path.write_text(final_output, encoding="utf-8", newline="\n")
     return output_path
+
+
+def postprocess_markdown(text: str, profile: BulletinProfile = BulletinProfile.DEFAULT) -> str:
+    text = re.sub(r"(?<!\n)\n(?!\n|#|\*|>)", " ", text)
+    text = re.sub(r" +", " ", text)
+    text = _split_inline_section_markers(text)
+    text = _move_interleaved_question_before_open_quote_section(text)
+
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text
 
 
 def sort_page_elements(
@@ -159,6 +167,33 @@ def markdown_for_item(item: dict) -> str:
     if label == "list_item":
         return f"* {text}\n"
     return f"{text}\n\n"
+
+
+def _split_inline_section_markers(text: str) -> str:
+    text = re.sub(r"(?<=\S) \*\s*(?=\S)", "\n\n*\n\n", text)
+    return re.sub(r"(?m)^(\* )(?=\S)", "*\n\n", text)
+
+
+def _move_interleaved_question_before_open_quote_section(text: str) -> str:
+    pattern = re.compile(
+        r"(?P<section>\*\n\n(?P<section_text>(?:(?!\n\n\*\n\n).)+?['׳](?:(?!\n\n\*\n\n).)+?\([^)]+\)\.))\n\n"
+        r"(?P<question>(?:מהי|מהו|מה|מדוע|למה|כיצד|איך|האם)\s+[^.\n]{8,140}\.) "
+        r"(?P<continuation>.+?)"
+        rf"(?=(?:\n\n\*|\n\n---|\Z))",
+        re.DOTALL,
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        section_text = match.group("section_text")
+        if _has_balanced_single_quotes(section_text):
+            return match.group(0)
+        return f"{match.group('question')}\n\n{match.group('section')} {match.group('continuation')}"
+
+    return pattern.sub(replace, text)
+
+
+def _has_balanced_single_quotes(text: str) -> bool:
+    return (text.count("'") + text.count("׳")) % 2 == 0
 
 
 def _page_number(item: dict) -> int:
