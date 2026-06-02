@@ -35,7 +35,7 @@ if not defined MD_PATH (
 )
 
 echo Converting PDF to JSON...
-python alonim_dataset/scripts/pdf_to_json.py "%PDF_PATH%" --output-dir "alonim_dataset/intermediate/docling_json" --rtl-mirror-input
+python alonim_dataset/scripts/pdf_to_json.py "%PDF_PATH%" --output-dir "alonim_dataset/intermediate/docling_json"
 if errorlevel 1 goto :fail
 
 echo Converting JSON to Markdown...

@@ -55,13 +55,13 @@ Convert a PDF to Docling JSON:
 python alonim_dataset/scripts/pdf_to_json.py alonim_dataset/source_data/pdf/example.pdf
 ```
 
-Experimental RTL layout pass:
+Disable the RTL layout mirror pass and use the older Docling CLI path:
 
 ```powershell
-python alonim_dataset/scripts/pdf_to_json.py alonim_dataset/source_data/pdf/example.pdf --rtl-mirror-input
+python alonim_dataset/scripts/pdf_to_json.py alonim_dataset/source_data/pdf/example.pdf --no-rtl-mirror-input
 ```
 
-הדגל הניסיוני מריץ Docling במעבר יחיד עם pipeline מותאם: תמונות העמוד
+ברירת המחדל מריצה את Docling במעבר יחיד עם pipeline מותאם: תמונות העמוד
 וקואורדינטות תאי הטקסט מוצגות למודלי ה־layout/table כאילו המסמך LTR,
 אך הטקסט עצמו נשאר הטקסט המקורי שחולץ מה־PDF. Docling עדיין רץ עם
 `--no-ocr` ו־`--table-mode accurate`. לפני שמירת ה־JSON הקוד מחזיר את
