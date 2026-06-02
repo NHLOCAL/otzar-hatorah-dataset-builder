@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import sys
 import unittest
+from tempfile import TemporaryDirectory
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from alonim.markdown_convert import postprocess_markdown, process_docling_document, sort_page_elements
+from alonim.markdown_convert import (
+    convert_docling_json_to_markdown,
+    postprocess_markdown,
+    process_docling_document,
+    sort_page_elements,
+)
 from alonim.profiles import BulletinProfile
 
 
@@ -119,6 +125,50 @@ class MarkdownConvertTests(unittest.TestCase):
 
         self.assertEqual([item["text"] for item in body], ["ראשון", "אמצע", "אחרון"])
         self.assertEqual(footnotes, [])
+
+    def test_mirrored_docling_markdown_keeps_docling_body_order(self) -> None:
+        data = {
+            "metadata": {"rtl_mirrored_input": True},
+            "pages": {"1": {"size": {"width": 600, "height": 800}}},
+            "body": {
+                "children": [
+                    {"$ref": "#/texts/0"},
+                    {"$ref": "#/texts/1"},
+                    {"$ref": "#/texts/2"},
+                ]
+            },
+            "texts": [
+                {
+                    "self_ref": "#/texts/0",
+                    "label": "text",
+                    "text": "ראשון לפי דוקלינג",
+                    "prov": [{"page_no": 1, "bbox": {"l": 40, "t": 300, "r": 280, "b": 250}}],
+                },
+                {
+                    "self_ref": "#/texts/1",
+                    "label": "text",
+                    "text": "שני לפי דוקלינג",
+                    "prov": [{"page_no": 1, "bbox": {"l": 320, "t": 700, "r": 560, "b": 650}}],
+                },
+                {
+                    "self_ref": "#/texts/2",
+                    "label": "text",
+                    "text": "שלישי לפי דוקלינג",
+                    "prov": [{"page_no": 1, "bbox": {"l": 40, "t": 700, "r": 280, "b": 650}}],
+                },
+            ],
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            json_path = Path(temp_dir) / "input.json"
+            output_path = Path(temp_dir) / "output.md"
+            json_path.write_text(__import__("json").dumps(data, ensure_ascii=False), encoding="utf-8")
+
+            convert_docling_json_to_markdown(json_path, output_path)
+
+            output = output_path.read_text(encoding="utf-8")
+            self.assertLess(output.index("ראשון לפי דוקלינג"), output.index("שני לפי דוקלינג"))
+            self.assertLess(output.index("שני לפי דוקלינג"), output.index("שלישי לפי דוקלינג"))
 
     def test_postprocess_markdown_splits_inline_star_section_markers(self) -> None:
         text = 'מדוע היה חשוב שאדם יתבע זאת בפיו. *"ויקרא האדם שמות לכל הבהמה"'

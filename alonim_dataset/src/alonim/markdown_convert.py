@@ -64,6 +64,7 @@ def convert_docling_json_to_markdown(json_path: Path, output_path: Path | None =
 
     data = json.loads(json_path.read_text(encoding="utf-8"))
     profile = profile_for_source(json_path)
+    preserve_docling_order = data.get("metadata", {}).get("rtl_mirrored_input") is True
     pages_data = process_docling_document(data)
     content: list[str] = []
 
@@ -71,7 +72,10 @@ def convert_docling_json_to_markdown(json_path: Path, output_path: Path | None =
         page_elements = pages_data[page_no]
         page_size = data.get("pages", {}).get(str(page_no), {}).get("size", {})
         page_width = page_size.get("width", 600)
-        body_items, footnotes = sort_page_elements(page_elements, page_width, profile)
+        if preserve_docling_order:
+            body_items, footnotes = docling_order_page_elements(page_elements)
+        else:
+            body_items, footnotes = sort_page_elements(page_elements, page_width, profile)
 
         content.append(f"\n---\n\n<!-- Page {page_no} -->\n\n")
         content.extend(markdown_for_item(item) for item in body_items)
@@ -84,6 +88,22 @@ def convert_docling_json_to_markdown(json_path: Path, output_path: Path | None =
     final_output = postprocess_markdown("".join(content), profile)
     output_path.write_text(final_output, encoding="utf-8", newline="\n")
     return output_path
+
+
+def docling_order_page_elements(page_elements: list[dict]) -> tuple[list[dict], list[dict]]:
+    body_items: list[dict] = []
+    footnotes: list[dict] = []
+
+    for item in page_elements:
+        label = item.get("label", "")
+        if label in {"page_footer", "page_header"}:
+            continue
+        if label == "footnote":
+            footnotes.append(item)
+        else:
+            body_items.append(item)
+
+    return body_items, footnotes
 
 
 def postprocess_markdown(text: str, profile: BulletinProfile = BulletinProfile.DEFAULT) -> str:
