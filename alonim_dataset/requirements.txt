@@ -7,4 +7,3 @@ python-bidi
 markitdown[all]
 pandas
 pyarrow
-pypdf

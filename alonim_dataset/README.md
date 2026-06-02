@@ -61,11 +61,11 @@ Experimental RTL layout pass:
 python alonim_dataset/scripts/pdf_to_json.py alonim_dataset/source_data/pdf/example.pdf --rtl-mirror-input
 ```
 
-הדגל הניסיוני מריץ Docling בשני מעברים: מעבר רגיל לשמירת הטקסט הלוגי,
-ומעבר על עותק PDF זמני עם היפוך אופקי של העמודים לשיפור פענוח ה־layout.
-בשני המעברים Docling רץ עם `--no-ocr` ו־`--table-mode accurate`. לאחר מכן
-הקוד מחזיר את קואורדינטות ה־layout למערכת המקורית ומשלב לתוכן המהופך את
-הטקסט התקין מהמעבר הרגיל.
+הדגל הניסיוני מריץ Docling במעבר יחיד עם pipeline מותאם: תמונות העמוד
+וקואורדינטות תאי הטקסט מוצגות למודלי ה־layout/table כאילו המסמך LTR,
+אך הטקסט עצמו נשאר הטקסט המקורי שחולץ מה־PDF. Docling עדיין רץ עם
+`--no-ocr` ו־`--table-mode accurate`. לפני שמירת ה־JSON הקוד מחזיר את
+קואורדינטות ה־layout למערכת המקורית.
 
 כאשר הקובץ נמצא תחת `source_data/pdf`, פלט ה־JSON נשמר תחת
 `intermediate/docling_json` באותו נתיב יחסי. כך עלונים מסדרות שונות בעלי

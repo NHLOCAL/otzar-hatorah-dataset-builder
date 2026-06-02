@@ -11,7 +11,6 @@ from alonim.docling_convert import (
     DEFAULT_DOCLING_ARGS,
     convert_pdf_to_docling_json,
     docling_json_output_path,
-    merge_original_text_into_mirrored_layout,
     restore_mirrored_docling_layout,
 )
 
@@ -43,7 +42,7 @@ class DoclingConvertTests(unittest.TestCase):
             "pages": {"1": {"size": {"width": 600, "height": 800}}},
             "texts": [
                 {
-                    "text": "סלב לאכימ יכדרמ",
+                    "text": "מרדכי מיכאל בלס",
                     "prov": [{"page_no": 1, "bbox": {"l": 100, "r": 220, "t": 700, "b": 650}}],
                 }
             ],
@@ -63,87 +62,154 @@ class DoclingConvertTests(unittest.TestCase):
         self.assertEqual(restored["pictures"][0]["prov"][0]["bbox"]["r"], 560)
         self.assertTrue(restored["metadata"]["rtl_mirrored_input"])
 
-    def test_merge_original_text_into_mirrored_layout_uses_overlapping_source_text(self) -> None:
-        original = {
-            "texts": [
-                {
-                    "self_ref": "#/texts/0",
-                    "label": "text",
-                    "text": "כך מצינו ב'מגן אברהם' שביאר טעם הדבר שמברכים על נטילת ידים בכל בוקר.",
-                    "prov": [{"page_no": 1, "bbox": {"l": 300, "t": 340, "r": 550, "b": 130}}],
-                }
-            ]
-        }
-        mirrored = {
-            "texts": [
-                {
-                    "self_ref": "#/texts/0",
-                    "label": "text",
-                    "text": "*",
-                    "prov": [{"page_no": 1, "bbox": {"l": 430, "t": 325, "r": 433, "b": 322}}],
-                },
-                {
-                    "self_ref": "#/texts/1",
-                    "label": "text",
-                    "text": "רקוב לכב םידי תליטנ לע םיכרבמש רבד",
-                    "prov": [{"page_no": 1, "bbox": {"l": 310, "t": 310, "r": 545, "b": 145}}],
-                },
-                {
-                    "self_ref": "#/texts/2",
-                    "label": "text",
-                    "text": "לפוכמ עטק",
-                    "prov": [{"page_no": 1, "bbox": {"l": 320, "t": 250, "r": 540, "b": 180}}],
-                },
-                {
-                    "self_ref": "#/texts/3",
-                    "label": "section_header",
-                    "text": "כותרת שזוהתה במירור",
-                    "prov": [{"page_no": 1, "bbox": {"l": 320, "t": 250, "r": 540, "b": 180}}],
-                },
-            ]
-        }
-
-        merge_original_text_into_mirrored_layout(original, mirrored)
-
-        self.assertEqual(mirrored["texts"][0]["text"], "*")
-        self.assertEqual(
-            mirrored["texts"][1]["text"],
-            "כך מצינו ב'מגן אברהם' שביאר טעם הדבר שמברכים על נטילת ידים בכל בוקר.",
-        )
-        self.assertEqual(mirrored["texts"][2]["text"], "")
-        self.assertEqual(mirrored["texts"][3]["text"], "כותרת שזוהתה במירור")
-
     def test_convert_pdf_to_docling_json_mirrors_input_without_enabling_ocr(self) -> None:
         from tempfile import TemporaryDirectory
 
-        from pypdf import PdfWriter
+        captured_pipeline_options: list[object] = []
+        test_case = self
 
-        captured_argv: list[list[str]] = []
+        class FakeDocument:
+            def export_to_dict(self) -> dict:
+                return {
+                    "pages": {"1": {"size": {"width": 600, "height": 800}}},
+                    "texts": [
+                        {
+                            "text": "מרדכי מיכאל בלס",
+                            "prov": [{"page_no": 1, "bbox": {"l": 100, "r": 220, "t": 700, "b": 650}}],
+                        }
+                    ],
+                }
 
-        def fake_docling_app() -> None:
-            captured_argv.append(sys.argv[:])
-            input_path = Path(sys.argv[-3])
-            output_dir = Path(sys.argv[-1])
+        class FakeConversionResult:
+            document = FakeDocument()
 
-            self.assertTrue(input_path.is_file())
-            self.assertEqual(input_path.name, "עלון.pdf")
+        class FakeDocumentConverter:
+            def __init__(self, *, allowed_formats: list[object], format_options: dict[object, object]) -> None:
+                self.allowed_formats = allowed_formats
+                self.format_options = format_options
+                option = next(iter(format_options.values()))
+                captured_pipeline_options.append(option.pipeline_options)
+                test_case.assertEqual(option.pipeline_cls.__name__, "RtlMirrorLayoutPipeline")
 
-            output_dir.mkdir(parents=True, exist_ok=True)
-            text = "מרדכי מיכאל בלס" if len(captured_argv) == 1 else "סלב לאכימ יכדרמ"
-            (output_dir / "עלון.json").write_text(
-                (
-                    '{"pages":{"1":{"size":{"width":600,"height":800}}},'
-                    f'"texts":[{{"text":"{text}","prov":[{{"page_no":1,"bbox":{{"l":100,"r":220,"t":700,"b":650}}}}]}}]}}'
-                ),
-                encoding="utf-8",
+            def convert(self, source: Path) -> FakeConversionResult:
+                test_case.assertEqual(source.name, "עלון.pdf")
+                return FakeConversionResult()
+
+        modules_to_restore = {
+            name: sys.modules.get(name)
+            for name in (
+                "docling",
+                "docling_core",
+                "docling_core.types",
+                "docling_core.types.doc",
+                "docling_core.types.doc.page",
+                "docling.datamodel",
+                "docling.datamodel.base_models",
+                "docling.datamodel.pipeline_options",
+                "docling.document_converter",
+                "docling.backend",
+                "docling.backend.pypdfium2_backend",
+                "docling.models",
+                "docling.models.stages",
+                "docling.models.stages.page_preprocessing",
+                "docling.models.stages.page_preprocessing.page_preprocessing_model",
+                "docling.pipeline",
+                "docling.pipeline.standard_pdf_pipeline",
             )
-            raise SystemExit(0)
-
-        modules_to_restore = {name: sys.modules.get(name) for name in ("docling", "docling.cli", "docling.cli.main")}
+        }
         sys.modules["docling"] = types.ModuleType("docling")
-        sys.modules["docling.cli"] = types.ModuleType("docling.cli")
-        sys.modules["docling.cli.main"] = types.ModuleType("docling.cli.main")
-        sys.modules["docling.cli.main"].app = fake_docling_app
+        sys.modules["docling_core"] = types.ModuleType("docling_core")
+        sys.modules["docling_core.types"] = types.ModuleType("docling_core.types")
+        sys.modules["docling_core.types.doc"] = types.ModuleType("docling_core.types.doc")
+        sys.modules["docling_core.types.doc.page"] = types.ModuleType("docling_core.types.doc.page")
+        sys.modules["docling.datamodel"] = types.ModuleType("docling.datamodel")
+        sys.modules["docling.datamodel.base_models"] = types.ModuleType("docling.datamodel.base_models")
+        sys.modules["docling.datamodel.pipeline_options"] = types.ModuleType("docling.datamodel.pipeline_options")
+        sys.modules["docling.document_converter"] = types.ModuleType("docling.document_converter")
+        sys.modules["docling.backend"] = types.ModuleType("docling.backend")
+        sys.modules["docling.backend.pypdfium2_backend"] = types.ModuleType("docling.backend.pypdfium2_backend")
+        sys.modules["docling.models"] = types.ModuleType("docling.models")
+        sys.modules["docling.models.stages"] = types.ModuleType("docling.models.stages")
+        sys.modules["docling.models.stages.page_preprocessing"] = types.ModuleType(
+            "docling.models.stages.page_preprocessing"
+        )
+        sys.modules["docling.models.stages.page_preprocessing.page_preprocessing_model"] = types.ModuleType(
+            "docling.models.stages.page_preprocessing.page_preprocessing_model"
+        )
+        sys.modules["docling.pipeline"] = types.ModuleType("docling.pipeline")
+        sys.modules["docling.pipeline.standard_pdf_pipeline"] = types.ModuleType("docling.pipeline.standard_pdf_pipeline")
+
+        class FakeInputFormat:
+            PDF = "pdf"
+
+        class FakeBoundingBox:
+            def __init__(self, *, l: float, r: float, t: float, b: float, coord_origin: object = None) -> None:
+                self.l = l
+                self.r = r
+                self.t = t
+                self.b = b
+                self.coord_origin = coord_origin
+
+        class FakeTableFormerMode:
+            ACCURATE = "accurate"
+
+        class FakeTableStructureOptions:
+            def __init__(self) -> None:
+                self.mode = None
+
+        class FakePdfPipelineOptions:
+            def __init__(self, *, do_ocr: bool, do_table_structure: bool) -> None:
+                self.do_ocr = do_ocr
+                self.do_table_structure = do_table_structure
+                self.table_structure_options = FakeTableStructureOptions()
+
+        class FakePdfFormatOption:
+            def __init__(self, *, pipeline_cls: type, backend: type, pipeline_options: object) -> None:
+                self.pipeline_cls = pipeline_cls
+                self.backend = backend
+                self.pipeline_options = pipeline_options
+
+        class FakePyPdfiumDocumentBackend:
+            pass
+
+        class FakeBoundingRectangle:
+            @classmethod
+            def from_bounding_box(cls, bbox: object) -> object:
+                return bbox
+
+        class FakePagePreprocessingModel:
+            def __init__(self, options: object) -> None:
+                self.options = options
+
+            def _populate_page_images(self, page: object) -> object:
+                return page
+
+            def _parse_page_cells(self, conv_res: object, page: object) -> object:
+                return page
+
+        class FakePagePreprocessingOptions:
+            def __init__(self, images_scale: object) -> None:
+                self.images_scale = images_scale
+
+        class FakeStandardPdfPipeline:
+            def _init_models(self) -> None:
+                self.preprocessing_model = None
+
+        sys.modules["docling.datamodel.base_models"].InputFormat = FakeInputFormat
+        sys.modules["docling.datamodel.base_models"].BoundingBox = FakeBoundingBox
+        sys.modules["docling.datamodel.pipeline_options"].PdfPipelineOptions = FakePdfPipelineOptions
+        sys.modules["docling.datamodel.pipeline_options"].TableFormerMode = FakeTableFormerMode
+        sys.modules["docling.document_converter"].DocumentConverter = FakeDocumentConverter
+        sys.modules["docling.document_converter"].PdfFormatOption = FakePdfFormatOption
+        sys.modules["docling.backend.pypdfium2_backend"].PyPdfiumDocumentBackend = FakePyPdfiumDocumentBackend
+        sys.modules["docling_core.types.doc.page"].BoundingRectangle = FakeBoundingRectangle
+        sys.modules[
+            "docling.models.stages.page_preprocessing.page_preprocessing_model"
+        ].PagePreprocessingModel = FakePagePreprocessingModel
+        sys.modules[
+            "docling.models.stages.page_preprocessing.page_preprocessing_model"
+        ].PagePreprocessingOptions = FakePagePreprocessingOptions
+        sys.modules["docling.pipeline.standard_pdf_pipeline"].StandardPdfPipeline = FakeStandardPdfPipeline
 
         try:
             with TemporaryDirectory() as temp_dir:
@@ -151,11 +217,7 @@ class DoclingConvertTests(unittest.TestCase):
                 output_dir = Path(temp_dir) / "json"
                 pdf_path = source_root / "series" / "עלון.pdf"
                 pdf_path.parent.mkdir(parents=True)
-
-                writer = PdfWriter()
-                writer.add_blank_page(width=600, height=800)
-                with pdf_path.open("wb") as handle:
-                    writer.write(handle)
+                pdf_path.write_bytes(b"%PDF-1.7\n")
 
                 output_path = convert_pdf_to_docling_json(
                     pdf_path,
@@ -165,13 +227,14 @@ class DoclingConvertTests(unittest.TestCase):
                 )
 
                 self.assertEqual(output_path, output_dir / "series" / "עלון.json")
-                self.assertEqual(len(captured_argv), 2)
-                self.assertIn("--no-ocr", captured_argv[-1])
-                self.assertIn("--table-mode", captured_argv[-1])
-                self.assertIn("accurate", captured_argv[-1])
+                self.assertEqual(len(captured_pipeline_options), 1)
+                self.assertFalse(captured_pipeline_options[0].do_ocr)
+                self.assertTrue(captured_pipeline_options[0].do_table_structure)
+                self.assertEqual(captured_pipeline_options[0].table_structure_options.mode, "accurate")
                 output_text = output_path.read_text(encoding="utf-8")
                 self.assertIn('"rtl_mirrored_input": true', output_text)
                 self.assertIn("מרדכי מיכאל בלס", output_text)
+                self.assertNotIn("סלב לאכימ יכדרמ", output_text)
         finally:
             for name, module in modules_to_restore.items():
                 if module is None:
