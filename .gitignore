@@ -207,3 +207,5 @@ otzaria-library/source_data/*
 otzaria-library/output_parquet/*
 !otzaria-library/source_data/.gitkeep
 !otzaria-library/output_parquet/.gitkeep
+/alonim_dataset/intermediate/docling_json_single_pass_mirror
+/alonim_dataset/intermediate/markdown_single_pass_mirror
