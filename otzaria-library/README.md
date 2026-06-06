@@ -7,9 +7,10 @@
 
 המסלול כאן לא משכפל את ריפו המקור המלא. במקום זאת הוא מוריד את
 `otzaria_latest.zip` ואת `otzaria_dicta_latest.zip` מה-Release האחרון,
-ומשלים אותם בקובצי `.txt` מתוך תיקיית `ExtraBooks` בלבד בארכיון
-`otzaria_latest.zip` של `library-141`. הקבצים נקראים ב-streaming ונכתבים
-לקובצי Parquet מפוצלים תחת `output_parquet`.
+ומשלים אותם בקובצי `.txt` שקיימים בארכיון `otzaria_latest.zip` של
+`library-141` אך חסרים ב-Release האחרון. ההפרש מחושב באמצעות
+`files_manifest.json` של שתי הגרסאות, ללא תלות בשם תיקיית המקור. הקבצים
+נקראים ב-streaming ונכתבים לקובצי Parquet מפוצלים תחת `output_parquet`.
 
 ## מבנה תיקייה
 
@@ -30,7 +31,8 @@ otzaria-library/
 
 - `otzaria_latest.zip`
 - `otzaria_dicta_latest.zip` אם רוצים לכלול גם את ספרי Dicta
-- `otzaria_library_141.zip` אם רוצים להשלים את ספרי `ExtraBooks` מגרסה 141
+- `otzaria_library_141.zip` אם רוצים להשלים ספרים שהוסרו אחרי גרסה 141
+- `files_manifest_141.json` שחולץ מהארכיון של גרסה 141
 - `files_manifest.json`
 - `metadata.json`
 
@@ -55,7 +57,8 @@ python otzaria-library/create_dataset.py `
 python otzaria-library/create_dataset.py `
   --archive-path otzaria-library/source_data/otzaria_latest.zip `
   --extra-archive-path otzaria-library/source_data/otzaria_dicta_latest.zip `
-  --archive-spec "otzaria-library/source_data/otzaria_library_141.zip::ExtraBooks" `
+  --supplement-archive-path otzaria-library/source_data/otzaria_library_141.zip `
+  --supplement-manifest-path otzaria-library/source_data/files_manifest_141.json `
   --manifest-path otzaria-library/source_data/files_manifest.json `
   --metadata-path otzaria-library/source_data/metadata.json `
   --github-release library-143
@@ -98,13 +101,19 @@ otzaria-library/output_parquet/judaic_texts-part-00002.parquet
 1. מוריד את `otzaria_latest.zip` ואת `otzaria_dicta_latest.zip` מה-Release הנבחר של `Otzaria/otzaria-library`.
 2. מוריד גם את `otzaria_latest.zip` של `library-141` בשם מקומי נפרד.
 3. מחלץ מה-Release הנבחר את `files_manifest.json` ו-`metadata.json`.
-4. בונה קובצי Parquet מהגרסה הנבחרת ומ-Dicta, ומוסיף מגרסה 141 רק קבצים שתיקיית הנתיב שלהם היא `ExtraBooks`.
-5. מעלה אותם אל `NHLOCAL/judaic-texts-corpus` תחת `data/`.
-6. מוחק לפני ההעלאה קובצי `data/*.parquet` ישנים כדי למנוע shards יתומים.
+4. משווה בין המניפסטים וממיר את נתיבי המקור לנתיבי ה-ZIP השטוחים מסוג `אוצריא/...`.
+5. בונה קובצי Parquet מהגרסה הנבחרת ומ-Dicta, ומוסיף מגרסה 141 רק ספרים שנתיבם אינו קיים בגרסה הנבחרת.
+6. מעלה אותם אל `NHLOCAL/judaic-texts-corpus` תחת `data/`.
+7. מוחק לפני ההעלאה קובצי `data/*.parquet` ישנים כדי למנוע shards יתומים.
 
 הארכיונים של ה-Release הנבחר מעובדים לפני הארכיון ההיסטורי. לכן, כאשר אותו
-ספר מופיע גם בגרסה האחרונה וגם תחת `ExtraBooks` בגרסה 141, נשמרת הגרסה
-האחרונה בלבד. ההתאמה ל-`ExtraBooks` אינה רגישה לאותיות גדולות וקטנות.
+ספר מופיע בשתי הגרסאות, נשמרת הגרסה האחרונה בלבד. אין להסתמך על שמות כמו
+`extraBooks` או `sefariaToOtzaria`: תהליך יצירת ה-Release משטח את תיקיות
+המקור, והארכיון מכיל נתיבים שמתחילים ב-`אוצריא`.
+
+ניתן לבדוק אילו ספרים יתווספו ללא הורדת ה-ZIP על ידי הורדת
+`files_manifest.json` משני תגי ה-GitHub והשוואת נתיבי ה-`.txt` לאחר הסרת
+החלק שלפני רכיב `אוצריא`.
 
 ההעלאה מתבצעת דרך הסקריפט המשותף `scripts/upload_directory_to_hf.py`. הסקריפט
 אינו נמצא בתיקייה זו משום שהוא כלי תשתיתי כללי המשמש כמה מקורות דאטה. מחיקת

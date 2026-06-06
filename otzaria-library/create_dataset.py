@@ -11,6 +11,7 @@ from otzaria_dataset.pipeline import (
     PipelineConfig,
     build_dataset,
     download_release_asset,
+    historical_only_archive_paths,
 )
 
 
@@ -62,6 +63,8 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--manifest-path", type=Path, default=DEFAULT_MANIFEST_PATH)
+    parser.add_argument("--supplement-archive-path", type=Path)
+    parser.add_argument("--supplement-manifest-path", type=Path)
     parser.add_argument("--metadata-path", type=Path, default=DEFAULT_METADATA_PATH)
     parser.add_argument("--parquet-output-dir", type=Path, default=DEFAULT_PARQUET_OUTPUT_DIR)
     parser.add_argument("--parquet-output-file", default=f"{DEFAULT_OUTPUT_BASENAME}.parquet")
@@ -118,14 +121,31 @@ def main() -> None:
                 )
             )
 
+    archive_inputs = [
+        ArchiveInput(archive_path),
+        *(ArchiveInput(path) for path in extra_archive_paths),
+        *args.archive_spec,
+    ]
+    if bool(args.supplement_archive_path) != bool(args.supplement_manifest_path):
+        raise SystemExit(
+            "--supplement-archive-path and --supplement-manifest-path must be used together"
+        )
+    if args.supplement_archive_path:
+        included_paths = historical_only_archive_paths(
+            args.supplement_manifest_path,
+            args.manifest_path,
+        )
+        archive_inputs.append(
+            ArchiveInput(
+                args.supplement_archive_path,
+                included_paths=included_paths,
+            )
+        )
+
     config = PipelineConfig(
         archive_path=archive_path,
         parquet_output_dir=args.parquet_output_dir,
-        archive_inputs=(
-            ArchiveInput(archive_path),
-            *(ArchiveInput(path) for path in extra_archive_paths),
-            *args.archive_spec,
-        ),
+        archive_inputs=tuple(archive_inputs),
         parquet_output_file=args.parquet_output_file,
         manifest_path=args.manifest_path,
         metadata_path=args.metadata_path,
@@ -147,6 +167,8 @@ def main() -> None:
             if archive_input.required_path_component
             else ""
         )
+        if archive_input.included_paths is not None:
+            suffix += f" (included manifest paths: {len(archive_input.included_paths)})"
         print(f"  - {archive_input.path}{suffix}")
     print(f"Manifest: {config.manifest_path}")
     print(f"Metadata: {config.metadata_path}")

@@ -44,6 +44,7 @@ env:
   OTZARIA_DICTA_RELEASE_ASSET: "otzaria_dicta_latest.zip"
   OTZARIA_LEGACY_RELEASE: "library-141"
   OTZARIA_LEGACY_ARCHIVE: "otzaria_library_141.zip"
+  OTZARIA_LEGACY_MANIFEST: "files_manifest_141.json"
 
 jobs:
   build-and-upload-otzaria:
@@ -120,6 +121,7 @@ jobs:
         run: |
           unzip -p "$OTZARIA_SOURCE_DIR/$OTZARIA_RELEASE_ASSET" files_manifest.json > "$OTZARIA_SOURCE_DIR/files_manifest.json"
           unzip -p "$OTZARIA_SOURCE_DIR/$OTZARIA_RELEASE_ASSET" metadata.json > "$OTZARIA_SOURCE_DIR/metadata.json"
+          unzip -p "$OTZARIA_SOURCE_DIR/$OTZARIA_LEGACY_ARCHIVE" files_manifest.json > "$OTZARIA_SOURCE_DIR/$OTZARIA_LEGACY_MANIFEST"
 
       - name: Build Parquet dataset
         if: ${{ steps.release.outputs.should_run == 'true' }}
@@ -129,7 +131,8 @@ jobs:
           python otzaria-library/create_dataset.py \
             --archive-path "$OTZARIA_SOURCE_DIR/$OTZARIA_RELEASE_ASSET" \
             --extra-archive-path "$OTZARIA_SOURCE_DIR/$OTZARIA_DICTA_RELEASE_ASSET" \
-            --archive-spec "$OTZARIA_SOURCE_DIR/$OTZARIA_LEGACY_ARCHIVE::ExtraBooks" \
+            --supplement-archive-path "$OTZARIA_SOURCE_DIR/$OTZARIA_LEGACY_ARCHIVE" \
+            --supplement-manifest-path "$OTZARIA_SOURCE_DIR/$OTZARIA_LEGACY_MANIFEST" \
             --manifest-path "$OTZARIA_SOURCE_DIR/files_manifest.json" \
             --metadata-path "$OTZARIA_SOURCE_DIR/metadata.json" \
             --parquet-output-dir "$OTZARIA_PARQUET_OUTPUT_DIR" \

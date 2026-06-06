@@ -14,6 +14,7 @@ from otzaria_dataset.pipeline import (
     ArchiveInput,
     PipelineConfig,
     build_dataset,
+    historical_only_archive_paths,
     load_metadata_index,
     make_record,
 )
@@ -229,21 +230,50 @@ class OtzariaPipelineTests(unittest.TestCase):
         )
         self.assertEqual([row["metadata"]["github_release"] for row in rows], ["library-143"] * 3)
 
-    def test_historical_archive_only_adds_extrabooks_and_latest_path_wins(self):
+    def test_historical_manifest_difference_uses_flattened_zip_paths(self):
+        current_manifest_path = self.root / "files_manifest_current.json"
+        historical_manifest_path = self.root / "files_manifest_141.json"
+        self.write_json(
+            current_manifest_path,
+            {
+                "MoreBooks/ספרים/אוצריא/הלכה/ספר קיים.txt": {"hash": "current"},
+                "current/links/קישור.json": {"hash": "link"},
+            },
+        )
+        self.write_json(
+            historical_manifest_path,
+            {
+                "sefariaToOtzaria/sefaria_export/ספרים/אוצריא/הלכה/ספר קיים.txt": {
+                    "hash": "old"
+                },
+                "sefariaToOtzaria/sefaria_export/ספרים/אוצריא/מחשבה/ספר שנשמר.txt": {
+                    "hash": "preserved"
+                },
+                "sefariaToOtzaria/sefaria_export/links/קישור.json": {"hash": "link"},
+            },
+        )
+
+        paths = historical_only_archive_paths(
+            historical_manifest_path,
+            current_manifest_path,
+        )
+
+        self.assertEqual(paths, frozenset({"אוצריא/מחשבה/ספר שנשמר.txt"}))
+
+    def test_historical_archive_only_adds_manifest_paths_and_latest_path_wins(self):
         historical_archive_path = self.root / "otzaria_library_141.zip"
         self.write_archive(
             {
-                "current/ספרים/אוצריא/הלכה/ספר קיים.txt": "נוסח עדכני",
-                "current/ספרים/אוצריא/הלכה/טקסט משותף.txt": "אותו טקסט",
+                "אוצריא/הלכה/ספר קיים.txt": "נוסח עדכני",
+                "אוצריא/הלכה/טקסט משותף.txt": "אותו טקסט",
             }
         )
         self.write_archive(
             {
-                "legacy/ספרים/אוצריא/ExtraBooks/הלכה/ספר קיים.txt": "נוסח ישן",
-                "legacy/ספרים/אוצריא/extrabooks/מחשבה/ספר שנשמר.txt": "תוכן שנשמר רק ב־141",
-                "legacy/ספרים/אוצריא/EXTRABOOKS/מחשבה/כפילות תוכן.txt": "אותו טקסט",
-                "legacy/ספרים/אוצריא/ספרים אחרים/ספר שלא ייכלל.txt": "תוכן לא רצוי",
-                "legacy/ExtraBooksBackup/ספרים/אוצריא/מחשבה/גם לא ייכלל.txt": "תוכן לא רצוי",
+                "אוצריא/הלכה/ספר קיים.txt": "נוסח ישן",
+                "אוצריא/מחשבה/ספר שנשמר.txt": "תוכן שנשמר רק ב־141",
+                "אוצריא/מחשבה/כפילות תוכן.txt": "אותו טקסט",
+                "אוצריא/מחשבה/ספר שלא ייכלל.txt": "תוכן לא רצוי",
             },
             path=historical_archive_path,
         )
@@ -257,7 +287,13 @@ class OtzariaPipelineTests(unittest.TestCase):
                     ArchiveInput(self.archive_path),
                     ArchiveInput(
                         historical_archive_path,
-                        required_path_component="ExtraBooks",
+                        included_paths=frozenset(
+                            {
+                                "אוצריא/הלכה/ספר קיים.txt",
+                                "אוצריא/מחשבה/ספר שנשמר.txt",
+                                "אוצריא/מחשבה/כפילות תוכן.txt",
+                            }
+                        ),
                     ),
                 ),
                 parquet_output_dir=self.root / "output_parquet",

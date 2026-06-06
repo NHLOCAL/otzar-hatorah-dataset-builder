@@ -51,6 +51,7 @@ PARQUET_SCHEMA = pa.schema(
 class ArchiveInput:
     path: Path
     required_path_component: str | None = None
+    included_paths: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -205,6 +206,23 @@ def load_manifest(path: Path | None) -> dict[str, dict[str, str]]:
     return {str(key).replace("\\", "/"): value for key, value in payload.items() if isinstance(value, dict)}
 
 
+def historical_only_archive_paths(
+    historical_manifest_path: Path,
+    current_manifest_path: Path,
+) -> frozenset[str]:
+    historical_paths = {
+        archive_path
+        for source_path in load_manifest(historical_manifest_path)
+        if (archive_path := _manifest_archive_path(source_path)) is not None
+    }
+    current_paths = {
+        archive_path
+        for source_path in load_manifest(current_manifest_path)
+        if (archive_path := _manifest_archive_path(source_path)) is not None
+    }
+    return frozenset(historical_paths - current_paths)
+
+
 def load_metadata_index(path: Path | None) -> dict[str, dict[str, str]]:
     if path is None or not path.exists():
         return {}
@@ -342,7 +360,13 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
 def iter_zip_text_entries(
     archive_path: Path,
     required_path_component: str | None = None,
+    included_paths: frozenset[str] | None = None,
 ) -> Iterator[_ZipTextEntry]:
+    normalized_included_paths = (
+        {_normalize_archive_identity_path(path) for path in included_paths}
+        if included_paths is not None
+        else None
+    )
     with zipfile.ZipFile(archive_path) as archive:
         for info in archive.infolist():
             normalized_path = info.filename.replace("\\", "/")
@@ -352,6 +376,12 @@ def iter_zip_text_entries(
             if required_path_component and not _path_has_component(
                 normalized_path,
                 required_path_component,
+            ):
+                continue
+            if (
+                normalized_included_paths is not None
+                and _normalize_archive_identity_path(normalized_path)
+                not in normalized_included_paths
             ):
                 continue
             try:
@@ -372,6 +402,7 @@ def iter_config_zip_text_entries(config: PipelineConfig) -> Iterator[_ZipTextEnt
         yield from iter_zip_text_entries(
             archive_input.path,
             required_path_component=archive_input.required_path_component,
+            included_paths=archive_input.included_paths,
         )
 
 
@@ -445,6 +476,25 @@ def _path_has_component(source_path: str, component: str) -> bool:
     expected = _normalize_identity_component(component)
     return any(
         _normalize_identity_component(part) == expected
+        for part in PurePosixPath(source_path).parts
+    )
+
+
+def _manifest_archive_path(source_path: str) -> str | None:
+    if not source_path.lower().endswith(".txt"):
+        return None
+    parts = PurePosixPath(source_path).parts
+    normalized_parts = [_normalize_identity_component(part) for part in parts]
+    try:
+        otzaria_index = normalized_parts.index(_normalize_identity_component("אוצריא"))
+    except ValueError:
+        return None
+    return "/".join(parts[otzaria_index:])
+
+
+def _normalize_archive_identity_path(source_path: str) -> str:
+    return "/".join(
+        _normalize_identity_component(part)
         for part in PurePosixPath(source_path).parts
     )
 
