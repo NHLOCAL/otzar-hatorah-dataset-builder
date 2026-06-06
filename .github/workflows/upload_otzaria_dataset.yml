@@ -42,6 +42,8 @@ env:
   OTZARIA_PARQUET_OUTPUT_DIR: "otzaria-library/output_parquet"
   OTZARIA_RELEASE_ASSET: "otzaria_latest.zip"
   OTZARIA_DICTA_RELEASE_ASSET: "otzaria_dicta_latest.zip"
+  OTZARIA_LEGACY_RELEASE: "library-141"
+  OTZARIA_LEGACY_ARCHIVE: "otzaria_library_141.zip"
 
 jobs:
   build-and-upload-otzaria:
@@ -107,6 +109,11 @@ jobs:
               --dir "$OTZARIA_SOURCE_DIR" \
               --clobber
           done
+          gh release download "$OTZARIA_LEGACY_RELEASE" \
+            --repo "$OTZARIA_SOURCE_REPO" \
+            --pattern "$OTZARIA_RELEASE_ASSET" \
+            --output "$OTZARIA_SOURCE_DIR/$OTZARIA_LEGACY_ARCHIVE" \
+            --clobber
 
       - name: Extract release metadata files
         if: ${{ steps.release.outputs.should_run == 'true' }}
@@ -122,6 +129,7 @@ jobs:
           python otzaria-library/create_dataset.py \
             --archive-path "$OTZARIA_SOURCE_DIR/$OTZARIA_RELEASE_ASSET" \
             --extra-archive-path "$OTZARIA_SOURCE_DIR/$OTZARIA_DICTA_RELEASE_ASSET" \
+            --archive-spec "$OTZARIA_SOURCE_DIR/$OTZARIA_LEGACY_ARCHIVE::ExtraBooks" \
             --manifest-path "$OTZARIA_SOURCE_DIR/files_manifest.json" \
             --metadata-path "$OTZARIA_SOURCE_DIR/metadata.json" \
             --parquet-output-dir "$OTZARIA_PARQUET_OUTPUT_DIR" \

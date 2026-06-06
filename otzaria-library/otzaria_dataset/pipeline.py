@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import shutil
+import unicodedata
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -47,6 +48,12 @@ PARQUET_SCHEMA = pa.schema(
 
 
 @dataclass(frozen=True)
+class ArchiveInput:
+    path: Path
+    required_path_component: str | None = None
+
+
+@dataclass(frozen=True)
 class PipelineConfig:
     archive_path: Path
     parquet_output_dir: Path
@@ -63,6 +70,7 @@ class PipelineConfig:
     clean_output: bool = True
     show_progress: bool = True
     archive_paths: tuple[Path, ...] | None = None
+    archive_inputs: tuple[ArchiveInput, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +87,7 @@ class PipelineResult:
 class _ZipTextEntry:
     source_path: str
     text: str
+    logical_book_key: str = ""
 
 
 class _ParquetShardWriter:
@@ -268,6 +277,7 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
     duplicate_records = 0
     read_errors = 0
     seen_text_hashes: set[str] = set()
+    seen_logical_book_keys: set[str] = set()
 
     try:
         batch: list[dict] = []
@@ -286,6 +296,10 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
                 skipped_empty_texts += 1
                 continue
 
+            if entry.logical_book_key and entry.logical_book_key in seen_logical_book_keys:
+                duplicate_records += 1
+                continue
+
             record = make_record(
                 source_path=entry.source_path,
                 text=entry.text,
@@ -301,6 +315,8 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
                     continue
                 seen_text_hashes.add(text_hash)
 
+            if entry.logical_book_key:
+                seen_logical_book_keys.add(entry.logical_book_key)
             batch.append(record)
             if len(batch) >= config.batch_size:
                 writer.write_records(batch)
@@ -323,12 +339,20 @@ def build_dataset(config: PipelineConfig) -> PipelineResult:
     )
 
 
-def iter_zip_text_entries(archive_path: Path) -> Iterator[_ZipTextEntry]:
+def iter_zip_text_entries(
+    archive_path: Path,
+    required_path_component: str | None = None,
+) -> Iterator[_ZipTextEntry]:
     with zipfile.ZipFile(archive_path) as archive:
         for info in archive.infolist():
             normalized_path = info.filename.replace("\\", "/")
             if info.is_dir() or not normalized_path.lower().endswith(".txt"):
                 yield _ZipTextEntry("", "non-txt")
+                continue
+            if required_path_component and not _path_has_component(
+                normalized_path,
+                required_path_component,
+            ):
                 continue
             try:
                 with archive.open(info) as handle:
@@ -336,21 +360,28 @@ def iter_zip_text_entries(archive_path: Path) -> Iterator[_ZipTextEntry]:
             except (OSError, UnicodeDecodeError):
                 yield _ZipTextEntry(normalized_path, "")
                 continue
-            yield _ZipTextEntry(normalized_path, text)
+            yield _ZipTextEntry(
+                normalized_path,
+                text,
+                _logical_book_key(normalized_path, required_path_component),
+            )
 
 
 def iter_config_zip_text_entries(config: PipelineConfig) -> Iterator[_ZipTextEntry]:
-    for archive_path in _resolve_archive_paths(config):
-        yield from iter_zip_text_entries(archive_path)
+    for archive_input in _resolve_archive_inputs(config):
+        yield from iter_zip_text_entries(
+            archive_input.path,
+            required_path_component=archive_input.required_path_component,
+        )
 
 
 def _validate_config(config: PipelineConfig) -> None:
-    archive_paths = _resolve_archive_paths(config)
-    if not archive_paths:
+    archive_inputs = _resolve_archive_inputs(config)
+    if not archive_inputs:
         raise FileNotFoundError("At least one archive path is required")
-    for archive_path in archive_paths:
-        if not archive_path.exists():
-            raise FileNotFoundError(f"Archive was not found: {archive_path}")
+    for archive_input in archive_inputs:
+        if not archive_input.path.exists():
+            raise FileNotFoundError(f"Archive was not found: {archive_input.path}")
     if config.batch_size < 1:
         raise ValueError("batch_size must be at least 1")
     if not config.parquet_output_file.endswith(".parquet"):
@@ -385,21 +416,60 @@ def _resolve_parquet_records_per_file(config: PipelineConfig) -> int | None:
 
 def _count_candidate_records(config: PipelineConfig) -> int:
     seen_text_hashes: set[str] = set()
+    seen_logical_book_keys: set[str] = set()
     count = 0
     for entry in iter_config_zip_text_entries(config):
         if entry.source_path == "" or not entry.text.strip():
+            continue
+        if entry.logical_book_key and entry.logical_book_key in seen_logical_book_keys:
             continue
         if config.deduplicate_text:
             text_hash = hashlib.sha256(entry.text.strip().encode("utf-8")).hexdigest()
             if text_hash in seen_text_hashes:
                 continue
             seen_text_hashes.add(text_hash)
+        if entry.logical_book_key:
+            seen_logical_book_keys.add(entry.logical_book_key)
         count += 1
     return count
 
 
-def _resolve_archive_paths(config: PipelineConfig) -> tuple[Path, ...]:
-    return config.archive_paths or (config.archive_path,)
+def _resolve_archive_inputs(config: PipelineConfig) -> tuple[ArchiveInput, ...]:
+    if config.archive_inputs is not None:
+        return config.archive_inputs
+    archive_paths = config.archive_paths or (config.archive_path,)
+    return tuple(ArchiveInput(path) for path in archive_paths)
+
+
+def _path_has_component(source_path: str, component: str) -> bool:
+    expected = _normalize_identity_component(component)
+    return any(
+        _normalize_identity_component(part) == expected
+        for part in PurePosixPath(source_path).parts
+    )
+
+
+def _logical_book_key(
+    source_path: str,
+    ignored_component: str | None = None,
+) -> str:
+    parts = list(PurePosixPath(source_path).parts)
+    normalized_parts = [_normalize_identity_component(part) for part in parts]
+    try:
+        otzaria_index = normalized_parts.index(_normalize_identity_component("אוצריא"))
+    except ValueError:
+        logical_parts = normalized_parts
+    else:
+        logical_parts = normalized_parts[otzaria_index + 1 :]
+
+    if ignored_component:
+        ignored = _normalize_identity_component(ignored_component)
+        logical_parts = [part for part in logical_parts if part != ignored]
+    return "/".join(logical_parts)
+
+
+def _normalize_identity_component(value: str) -> str:
+    return unicodedata.normalize("NFC", value).casefold()
 
 
 def _target_file_size_bytes(config: PipelineConfig) -> int | None:

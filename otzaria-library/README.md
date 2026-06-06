@@ -5,10 +5,11 @@
 הדאטהסט הקיים ב-Hugging Face:
 [NHLOCAL/judaic-texts-corpus](https://huggingface.co/datasets/NHLOCAL/judaic-texts-corpus).
 
-המסלול כאן לא משכפל את ריפו המקור המלא. במקום זאת הוא מוריד רק את קובץ
-ה-Release הרשמי `otzaria_latest.zip`, ובנוסף את `otzaria_dicta_latest.zip`
-כאשר הוא זמין באותו Release, קורא מהם קובצי `.txt` ב-streaming, ומייצר
-קובצי Parquet מפוצלים תחת `output_parquet`.
+המסלול כאן לא משכפל את ריפו המקור המלא. במקום זאת הוא מוריד את
+`otzaria_latest.zip` ואת `otzaria_dicta_latest.zip` מה-Release האחרון,
+ומשלים אותם בקובצי `.txt` מתוך תיקיית `ExtraBooks` בלבד בארכיון
+`otzaria_latest.zip` של `library-141`. הקבצים נקראים ב-streaming ונכתבים
+לקובצי Parquet מפוצלים תחת `output_parquet`.
 
 ## מבנה תיקייה
 
@@ -29,6 +30,7 @@ otzaria-library/
 
 - `otzaria_latest.zip`
 - `otzaria_dicta_latest.zip` אם רוצים לכלול גם את ספרי Dicta
+- `otzaria_library_141.zip` אם רוצים להשלים את ספרי `ExtraBooks` מגרסה 141
 - `files_manifest.json`
 - `metadata.json`
 
@@ -53,6 +55,7 @@ python otzaria-library/create_dataset.py `
 python otzaria-library/create_dataset.py `
   --archive-path otzaria-library/source_data/otzaria_latest.zip `
   --extra-archive-path otzaria-library/source_data/otzaria_dicta_latest.zip `
+  --archive-spec "otzaria-library/source_data/otzaria_library_141.zip::ExtraBooks" `
   --manifest-path otzaria-library/source_data/files_manifest.json `
   --metadata-path otzaria-library/source_data/metadata.json `
   --github-release library-143
@@ -93,10 +96,15 @@ otzaria-library/output_parquet/judaic_texts-part-00002.parquet
 ה-workflow `.github/workflows/upload_otzaria_dataset.yml`:
 
 1. מוריד את `otzaria_latest.zip` ואת `otzaria_dicta_latest.zip` מה-Release הנבחר של `Otzaria/otzaria-library`.
-2. מחלץ ממנו `files_manifest.json` ו-`metadata.json`.
-3. בונה קובצי Parquet מפוצלים.
-4. מעלה אותם אל `NHLOCAL/judaic-texts-corpus` תחת `data/`.
-5. מוחק לפני ההעלאה קובצי `data/*.parquet` ישנים כדי למנוע shards יתומים.
+2. מוריד גם את `otzaria_latest.zip` של `library-141` בשם מקומי נפרד.
+3. מחלץ מה-Release הנבחר את `files_manifest.json` ו-`metadata.json`.
+4. בונה קובצי Parquet מהגרסה הנבחרת ומ-Dicta, ומוסיף מגרסה 141 רק קבצים שתיקיית הנתיב שלהם היא `ExtraBooks`.
+5. מעלה אותם אל `NHLOCAL/judaic-texts-corpus` תחת `data/`.
+6. מוחק לפני ההעלאה קובצי `data/*.parquet` ישנים כדי למנוע shards יתומים.
+
+הארכיונים של ה-Release הנבחר מעובדים לפני הארכיון ההיסטורי. לכן, כאשר אותו
+ספר מופיע גם בגרסה האחרונה וגם תחת `ExtraBooks` בגרסה 141, נשמרת הגרסה
+האחרונה בלבד. ההתאמה ל-`ExtraBooks` אינה רגישה לאותיות גדולות וקטנות.
 
 ההעלאה מתבצעת דרך הסקריפט המשותף `scripts/upload_directory_to_hf.py`. הסקריפט
 אינו נמצא בתיקייה זו משום שהוא כלי תשתיתי כללי המשמש כמה מקורות דאטה. מחיקת
@@ -121,7 +129,8 @@ data/*.parquet
 - אין clone מלא של upstream.
 - אין חילוץ מלא של ה-ZIP לתיקייה זמנית.
 - הטקסטים נקראים מתוך ה-ZIP ונכתבים ל-Parquet ב-batches.
-- דה-דופליקציה נעשית לפי SHA-256 של הטקסט המנוקה.
+- דה-דופליקציה נעשית תחילה לפי הנתיב הלוגי של הספר, עם עדיפות לארכיון
+  שהוגדר ראשון, ולאחר מכן לפי SHA-256 של הטקסט המנוקה.
 - פיצול Parquet יכול להתבצע לפי מספר shards, מספר רשומות לקובץ, או יעד גודל.
 
 ## רישוי

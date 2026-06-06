@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import sys
 import tempfile
@@ -10,11 +11,21 @@ import pyarrow.parquet as pq
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from otzaria_dataset.pipeline import (
+    ArchiveInput,
     PipelineConfig,
     build_dataset,
     load_metadata_index,
     make_record,
 )
+
+CREATE_DATASET_PATH = Path(__file__).resolve().parents[1] / "create_dataset.py"
+CREATE_DATASET_SPEC = importlib.util.spec_from_file_location(
+    "otzaria_create_dataset",
+    CREATE_DATASET_PATH,
+)
+CREATE_DATASET_MODULE = importlib.util.module_from_spec(CREATE_DATASET_SPEC)
+assert CREATE_DATASET_SPEC.loader is not None
+CREATE_DATASET_SPEC.loader.exec_module(CREATE_DATASET_MODULE)
 
 
 class OtzariaPipelineTests(unittest.TestCase):
@@ -56,6 +67,21 @@ class OtzariaPipelineTests(unittest.TestCase):
 
         self.assertEqual(index["ברכות"]["author"], "מחבר א")
         self.assertEqual(index["שבת"]["title"], "שבת")
+
+    def test_parse_archive_spec_supports_optional_path_component_filter(self):
+        plain = CREATE_DATASET_MODULE.parse_archive_spec("source/latest.zip")
+        filtered = CREATE_DATASET_MODULE.parse_archive_spec(
+            "source/otzaria_library_141.zip::ExtraBooks"
+        )
+
+        self.assertEqual(plain, ArchiveInput(Path("source/latest.zip")))
+        self.assertEqual(
+            filtered,
+            ArchiveInput(
+                Path("source/otzaria_library_141.zip"),
+                required_path_component="ExtraBooks",
+            ),
+        )
 
     def test_make_record_derives_book_category_hash_and_license_note(self):
         metadata_index = {
@@ -202,6 +228,60 @@ class OtzariaPipelineTests(unittest.TestCase):
             ],
         )
         self.assertEqual([row["metadata"]["github_release"] for row in rows], ["library-143"] * 3)
+
+    def test_historical_archive_only_adds_extrabooks_and_latest_path_wins(self):
+        historical_archive_path = self.root / "otzaria_library_141.zip"
+        self.write_archive(
+            {
+                "current/ספרים/אוצריא/הלכה/ספר קיים.txt": "נוסח עדכני",
+                "current/ספרים/אוצריא/הלכה/טקסט משותף.txt": "אותו טקסט",
+            }
+        )
+        self.write_archive(
+            {
+                "legacy/ספרים/אוצריא/ExtraBooks/הלכה/ספר קיים.txt": "נוסח ישן",
+                "legacy/ספרים/אוצריא/extrabooks/מחשבה/ספר שנשמר.txt": "תוכן שנשמר רק ב־141",
+                "legacy/ספרים/אוצריא/EXTRABOOKS/מחשבה/כפילות תוכן.txt": "אותו טקסט",
+                "legacy/ספרים/אוצריא/ספרים אחרים/ספר שלא ייכלל.txt": "תוכן לא רצוי",
+                "legacy/ExtraBooksBackup/ספרים/אוצריא/מחשבה/גם לא ייכלל.txt": "תוכן לא רצוי",
+            },
+            path=historical_archive_path,
+        )
+        self.write_json(self.manifest_path, {})
+        self.write_json(self.metadata_path, [])
+
+        result = build_dataset(
+            PipelineConfig(
+                archive_path=self.archive_path,
+                archive_inputs=(
+                    ArchiveInput(self.archive_path),
+                    ArchiveInput(
+                        historical_archive_path,
+                        required_path_component="ExtraBooks",
+                    ),
+                ),
+                parquet_output_dir=self.root / "output_parquet",
+                parquet_output_file="judaic_texts.parquet",
+                manifest_path=self.manifest_path,
+                metadata_path=self.metadata_path,
+                github_release="library-150",
+                parquet_shards=1,
+                batch_size=10,
+                show_progress=False,
+            )
+        )
+
+        rows = pq.read_table(result.parquet_paths[0]).to_pylist()
+        self.assertEqual(
+            [(row["metadata"]["book_name"], row["text"]) for row in rows],
+            [
+                ("ספר קיים", "נוסח עדכני"),
+                ("טקסט משותף", "אותו טקסט"),
+                ("ספר שנשמר", "תוכן שנשמר רק ב־141"),
+            ],
+        )
+        self.assertEqual(result.processed_records, 3)
+        self.assertEqual(result.duplicate_records, 2)
 
 
 if __name__ == "__main__":

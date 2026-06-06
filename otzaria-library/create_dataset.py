@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from otzaria_dataset.pipeline import (
+    ArchiveInput,
     DEFAULT_OUTPUT_BASENAME,
     DEFAULT_RELEASE_ASSET,
     DEFAULT_REPO,
@@ -21,6 +22,20 @@ DEFAULT_METADATA_PATH = DEFAULT_SOURCE_DIR / "metadata.json"
 DEFAULT_PARQUET_OUTPUT_DIR = SCRIPT_DIR / "output_parquet"
 
 
+def parse_archive_spec(value: str) -> ArchiveInput:
+    path_value, separator, component = value.rpartition("::")
+    if not separator:
+        return ArchiveInput(Path(value))
+    if not path_value or not component:
+        raise argparse.ArgumentTypeError(
+            "archive spec must use PATH or PATH::REQUIRED_COMPONENT"
+        )
+    return ArchiveInput(
+        Path(path_value),
+        required_path_component=component,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -35,6 +50,16 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         help="Additional Otzaria release archive to include. Can be passed more than once.",
+    )
+    parser.add_argument(
+        "--archive-spec",
+        type=parse_archive_spec,
+        action="append",
+        default=[],
+        help=(
+            "Additional archive as PATH or PATH::REQUIRED_COMPONENT. "
+            "Can be passed more than once."
+        ),
     )
     parser.add_argument("--manifest-path", type=Path, default=DEFAULT_MANIFEST_PATH)
     parser.add_argument("--metadata-path", type=Path, default=DEFAULT_METADATA_PATH)
@@ -96,7 +121,11 @@ def main() -> None:
     config = PipelineConfig(
         archive_path=archive_path,
         parquet_output_dir=args.parquet_output_dir,
-        archive_paths=(archive_path, *extra_archive_paths),
+        archive_inputs=(
+            ArchiveInput(archive_path),
+            *(ArchiveInput(path) for path in extra_archive_paths),
+            *args.archive_spec,
+        ),
         parquet_output_file=args.parquet_output_file,
         manifest_path=args.manifest_path,
         metadata_path=args.metadata_path,
@@ -112,8 +141,13 @@ def main() -> None:
 
     print("Building Otzaria Library dataset")
     print("Archives:")
-    for path in config.archive_paths or (config.archive_path,):
-        print(f"  - {path}")
+    for archive_input in config.archive_inputs or (ArchiveInput(config.archive_path),):
+        suffix = (
+            f" (requires path component: {archive_input.required_path_component})"
+            if archive_input.required_path_component
+            else ""
+        )
+        print(f"  - {archive_input.path}{suffix}")
     print(f"Manifest: {config.manifest_path}")
     print(f"Metadata: {config.metadata_path}")
     print(f"Parquet output directory: {config.parquet_output_dir}")
