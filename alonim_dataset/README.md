@@ -55,11 +55,20 @@ Convert a PDF to Docling JSON:
 python alonim_dataset/scripts/pdf_to_json.py alonim_dataset/source_data/pdf/example.pdf
 ```
 
+כאשר הקובץ נמצא תחת `source_data/pdf`, פלט ה־JSON נשמר תחת
+`intermediate/docling_json` באותו נתיב יחסי. כך עלונים מסדרות שונות בעלי
+אותו שם קובץ אינם דורסים זה את זה.
+
 Convert Docling JSON to Markdown:
 
 ```powershell
 python alonim_dataset/scripts/json_to_md.py alonim_dataset/intermediate/docling_json/example.json
 ```
+
+שלב ה־Markdown מפעיל נרמול RTL/עברית ופרופילי Layout לפי סדרת העלון
+כאשר היא מזוהה מהנתיב או משם הקובץ. הפרופילים הקיימים מכסים את
+`מאמרי הרב מרדכי בלס`, `מתיקות הפרשה`, ו־`שיעורי ליל שישי - ישיבת ברכת יצחק`,
+עם ברירת מחדל למסמכים אחרים.
 
 Build Parquet from Markdown:
 

@@ -5,10 +5,12 @@ import re
 from pathlib import Path
 
 from .config import DEFAULT_MARKDOWN_DIR
+from .profiles import BulletinProfile, profile_for_source
+from .rtl_normalize import normalize_hebrew_text
 
 
 def clean_ocr_text(text: str) -> str:
-    return text.strip() if isinstance(text, str) else text
+    return normalize_hebrew_text(text) if isinstance(text, str) else text
 
 
 def process_docling_document(data: dict) -> dict[int, list[dict]]:
@@ -31,20 +33,21 @@ def process_docling_document(data: dict) -> dict[int, list[dict]]:
             continue
 
         if item.get("label") == "picture" and "children" in item:
-            has_framed_text = False
             for child_ref in item.get("children", []):
-                child_item = element_map.get(child_ref.get("$ref"))
+                child_ref_path = child_ref.get("$ref")
+                if not child_ref_path or child_ref_path in processed_refs:
+                    continue
+                child_item = element_map.get(child_ref_path)
                 if child_item and "text" in child_item:
                     child_item["is_framed"] = True
-                    has_framed_text = True
-            if has_framed_text:
-                processed_refs.add(ref_path)
-                continue
+                    page_no = _page_number(child_item)
+                    pages_data.setdefault(page_no, []).append(child_item)
+                    processed_refs.add(child_ref_path)
+            processed_refs.add(ref_path)
+            continue
 
         page_no = _page_number(item)
-        pages_data.setdefault(page_no, [])
-        if ref_path not in {element.get("self_ref") for element in pages_data[page_no]}:
-            pages_data[page_no].append(item)
+        pages_data.setdefault(page_no, []).append(item)
         processed_refs.add(ref_path)
 
     return pages_data
@@ -56,10 +59,11 @@ def convert_docling_json_to_markdown(json_path: Path, output_path: Path | None =
         raise FileNotFoundError(f"Source JSON was not found: {json_path}")
 
     if output_path is None:
-        output_path = DEFAULT_MARKDOWN_DIR / f"{json_path.stem}.md"
+        output_path = _default_markdown_output_path(json_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     data = json.loads(json_path.read_text(encoding="utf-8"))
+    profile = profile_for_source(json_path)
     pages_data = process_docling_document(data)
     content: list[str] = []
 
@@ -67,7 +71,7 @@ def convert_docling_json_to_markdown(json_path: Path, output_path: Path | None =
         page_elements = pages_data[page_no]
         page_size = data.get("pages", {}).get(str(page_no), {}).get("size", {})
         page_width = page_size.get("width", 600)
-        body_items, footnotes = sort_page_elements(page_elements, page_width)
+        body_items, footnotes = sort_page_elements(page_elements, page_width, profile)
 
         content.append(f"\n---\n\n<!-- Page {page_no} -->\n\n")
         content.extend(markdown_for_item(item) for item in body_items)
@@ -77,14 +81,26 @@ def convert_docling_json_to_markdown(json_path: Path, output_path: Path | None =
             for item in footnotes:
                 content.append(f"*{clean_ocr_text(item.get('text', ''))}*\n\n")
 
-    final_output = "".join(content)
-    final_output = re.sub(r"(?<!\n)\n(?!\n|#|\*|>)", " ", final_output)
-    final_output = re.sub(r" +", " ", final_output)
+    final_output = postprocess_markdown("".join(content), profile)
     output_path.write_text(final_output, encoding="utf-8", newline="\n")
     return output_path
 
 
-def sort_page_elements(page_elements: list[dict], page_width: float) -> tuple[list[dict], list[dict]]:
+def postprocess_markdown(text: str, profile: BulletinProfile = BulletinProfile.DEFAULT) -> str:
+    text = re.sub(r"(?<!\n)\n(?!\n|#|\*|>)", " ", text)
+    text = re.sub(r" +", " ", text)
+    text = _split_inline_section_markers(text)
+    text = _move_interleaved_question_before_open_quote_section(text)
+
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text
+
+
+def sort_page_elements(
+    page_elements: list[dict],
+    page_width: float,
+    profile: BulletinProfile = BulletinProfile.DEFAULT,
+) -> tuple[list[dict], list[dict]]:
     if not page_width or not page_elements:
         return page_elements, []
 
@@ -94,6 +110,7 @@ def sort_page_elements(page_elements: list[dict], page_width: float) -> tuple[li
     footnotes: list[dict] = []
     center_margin = page_width * 0.1
     page_center = page_width / 2
+    top_threshold = _top_header_threshold(page_elements)
 
     for item in page_elements:
         label = item.get("label", "")
@@ -112,7 +129,12 @@ def sort_page_elements(page_elements: list[dict], page_width: float) -> tuple[li
             interrupting_blocks.append(item)
             continue
 
-        if item.get("is_framed") or item_width > page_width * 0.65:
+        if (
+            item.get("is_framed")
+            or item_width > page_width * 0.65
+            or _is_centered_block(item, page_center)
+            or (profile == BulletinProfile.METIKUT_HAPARSHA and _is_top_masthead(item, top_threshold))
+        ):
             interrupting_blocks.append(item)
         elif item_right < page_center + center_margin:
             left_col.append(item)
@@ -126,7 +148,8 @@ def sort_page_elements(page_elements: list[dict], page_width: float) -> tuple[li
         group.sort(key=sort_key, reverse=True)
 
     body_items = interrupting_blocks + right_col + left_col
-    body_items.sort(key=sort_key, reverse=True)
+    if profile not in {BulletinProfile.MORDECHAI_BLASS, BulletinProfile.METIKUT_HAPARSHA}:
+        body_items.sort(key=sort_key, reverse=True)
     return body_items, footnotes
 
 
@@ -146,8 +169,75 @@ def markdown_for_item(item: dict) -> str:
     return f"{text}\n\n"
 
 
+def _split_inline_section_markers(text: str) -> str:
+    text = re.sub(r"(?<=\S) \*\s*(?=\S)", "\n\n*\n\n", text)
+    return re.sub(r"(?m)^(\* )(?=\S)", "*\n\n", text)
+
+
+def _move_interleaved_question_before_open_quote_section(text: str) -> str:
+    pattern = re.compile(
+        r"(?P<section>\*\n\n(?P<section_text>(?:(?!\n\n\*\n\n).)+?['׳](?:(?!\n\n\*\n\n).)+?\([^)]+\)\.))\n\n"
+        r"(?P<question>(?:מהי|מהו|מה|מדוע|למה|כיצד|איך|האם)\s+[^.\n]{8,140}\.) "
+        r"(?P<continuation>.+?)"
+        rf"(?=(?:\n\n\*|\n\n---|\Z))",
+        re.DOTALL,
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        section_text = match.group("section_text")
+        if _has_balanced_single_quotes(section_text):
+            return match.group(0)
+        return f"{match.group('question')}\n\n{match.group('section')} {match.group('continuation')}"
+
+    return pattern.sub(replace, text)
+
+
+def _has_balanced_single_quotes(text: str) -> bool:
+    return (text.count("'") + text.count("׳")) % 2 == 0
+
+
 def _page_number(item: dict) -> int:
     try:
         return int(item["prov"][0]["page_no"])
     except (KeyError, IndexError, TypeError, ValueError):
         return 1
+
+
+def _is_centered_block(item: dict, page_center: float) -> bool:
+    try:
+        bbox = item["prov"][0]["bbox"]
+        return bbox["l"] < page_center < bbox["r"]
+    except (KeyError, IndexError, TypeError):
+        return False
+
+
+def _top_header_threshold(page_elements: list[dict]) -> float | None:
+    tops: list[float] = []
+    for item in page_elements:
+        try:
+            tops.append(float(item["prov"][0]["bbox"]["t"]))
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+    if not tops:
+        return None
+    return max(tops) - 80
+
+
+def _is_top_masthead(item: dict, top_threshold: float | None) -> bool:
+    if top_threshold is None:
+        return False
+    try:
+        return float(item["prov"][0]["bbox"]["t"]) >= top_threshold
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
+
+
+def _default_markdown_output_path(json_path: Path) -> Path:
+    parts = json_path.parts
+    if "docling_json" not in parts:
+        return DEFAULT_MARKDOWN_DIR / f"{json_path.stem}.md"
+
+    relative_parts = parts[parts.index("docling_json") + 1 :]
+    if not relative_parts:
+        return DEFAULT_MARKDOWN_DIR / f"{json_path.stem}.md"
+    return DEFAULT_MARKDOWN_DIR.joinpath(*relative_parts).with_suffix(".md")
